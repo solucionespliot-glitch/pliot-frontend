@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
+import { useSiteContext } from '../hooks/useSiteContext'
 
 interface Site {
   id: string
@@ -14,6 +15,7 @@ async function fetchSites(): Promise<Site[]> {
 
 export default function SiteSelector() {
   const navigate = useNavigate()
+  const { setSiteId } = useSiteContext()
   const { data: sites, isLoading, isError } = useQuery({ queryKey: ['sites'], queryFn: fetchSites })
 
   return (
@@ -40,7 +42,7 @@ export default function SiteSelector() {
           {sites?.map((site) => (
             <li key={site.id}>
               <button
-                onClick={() => navigate('/dashboard')}
+                onClick={() => { setSiteId(site.id); navigate('/dashboard') }}
                 style={{
                   width: '100%',
                   textAlign: 'left',
