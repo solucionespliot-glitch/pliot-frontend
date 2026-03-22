@@ -3,11 +3,15 @@ import { useNavigate } from 'react-router-dom'
 import { useSiteContext } from '../../hooks/useSiteContext'
 import { getSiteDevices, type Device } from '../../services/devicesService'
 
-function isOnline(lastSeenAt: string): boolean {
-  return Date.now() - new Date(lastSeenAt).getTime() < 5 * 60 * 1000
+function isOnline(device: Device): boolean {
+  return device.online || (
+    !!device.last_seen_at &&
+    Date.now() - new Date(device.last_seen_at).getTime() < 5 * 60 * 1000
+  )
 }
 
-function formatLastSeen(lastSeenAt: string): string {
+function formatLastSeen(lastSeenAt: string | null): string {
+  if (!lastSeenAt) return '—'
   const diffMs = Date.now() - new Date(lastSeenAt).getTime()
   const diffMin = Math.floor(diffMs / 60000)
   if (diffMin < 1) return 'Just now'
@@ -17,8 +21,7 @@ function formatLastSeen(lastSeenAt: string): string {
   return `${Math.floor(diffH / 24)}d ago`
 }
 
-function StatusBadge({ lastSeenAt }: { lastSeenAt: string }) {
-  const online = isOnline(lastSeenAt)
+function StatusBadge({ online }: { online: boolean }) {
   return (
     <span style={{
       display: 'inline-block',
@@ -61,6 +64,7 @@ export default function DevicesModule() {
     queryKey: ['devices', siteId],
     queryFn: () => getSiteDevices(siteId!),
     enabled: !!siteId,
+    refetchInterval: 30_000, // refresh every 30s
   })
 
   if (!siteId) {
@@ -108,6 +112,7 @@ export default function DevicesModule() {
           </thead>
           <tbody>
             {isLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)}
+
             {!isLoading && devices?.map((device: Device) => (
               <tr
                 key={device.device_id}
@@ -121,10 +126,10 @@ export default function DevicesModule() {
                 onMouseLeave={(e) => (e.currentTarget.style.background = '')}
               >
                 <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#111827' }}>
-                  {device.device_id}
+                  {device.display_name || device.device_id}
                 </td>
-                <td style={{ padding: '12px 16px', color: '#374151' }}>{device.type}</td>
-                <td style={{ padding: '12px 16px', color: '#374151' }}>{device.zone}</td>
+                <td style={{ padding: '12px 16px', color: '#374151' }}>{device.device_type}</td>
+                <td style={{ padding: '12px 16px', color: '#374151' }}>{device.zone_name ?? '—'}</td>
                 <td style={{ padding: '12px 16px', color: '#6b7280' }}>
                   {formatLastSeen(device.last_seen_at)}
                 </td>
@@ -135,13 +140,14 @@ export default function DevicesModule() {
                   {device.humidity != null ? device.humidity.toFixed(1) : '—'}
                 </td>
                 <td style={{ padding: '12px 16px', color: '#374151' }}>
-                  {device.battery != null ? device.battery.toFixed(2) : '—'}
+                  {device.battery_voltage != null ? device.battery_voltage.toFixed(2) : '—'}
                 </td>
                 <td style={{ padding: '12px 16px' }}>
-                  <StatusBadge lastSeenAt={device.last_seen_at} />
+                  <StatusBadge online={isOnline(device)} />
                 </td>
               </tr>
             ))}
+
             {!isLoading && !isError && devices?.length === 0 && (
               <tr>
                 <td colSpan={8} style={{ padding: '32px 16px', textAlign: 'center', color: '#9ca3af' }}>
