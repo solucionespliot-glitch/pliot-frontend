@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useSiteContext } from '../../hooks/useSiteContext'
 import { getSiteDevices, type Device } from '../../services/devicesService'
 
@@ -70,7 +70,7 @@ export default function DevicesModule() {
   if (!siteId) {
     return (
       <div style={{ padding: 32, color: '#6b7280' }}>
-        No site selected. <Link to="/select-site" style={{ color: '#4f46e5' }}>Select a site</Link>
+        No site selected. <a href="/select-site" style={{ color: '#4f46e5' }}>Select a site</a>
       </div>
     )
   }
