@@ -68,7 +68,7 @@ function ControllerRow({ controller }: { controller: Controller }) {
 
   return (
     <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-      <td style={{ padding: '12px 16px', fontWeight: 500, color: '#111827' }}>{controller.name}</td>
+      <td style={{ padding: '12px 16px', fontWeight: 500, color: '#111827' }}>{controller.device_name}</td>
       <td style={{ padding: '12px 16px' }}>
         <SyncBadge status={controller.sync_status} />
       </td>
@@ -88,7 +88,7 @@ function ControllerRow({ controller }: { controller: Controller }) {
         )}
       </td>
       <td style={{ padding: '12px 16px', fontSize: 13, color: '#6b7280' }}>
-        {formatHeartbeat(controller.last_heartbeat_at)}
+        {formatHeartbeat(controller.last_seen_at)}
       </td>
     </tr>
   )

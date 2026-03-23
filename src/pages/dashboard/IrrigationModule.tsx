@@ -20,9 +20,10 @@ const ALLOWED_ROLES = ['producer', 'operator', 'superuser']
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<IrrigationTurn['status'], { bg: string; text: string; label: string }> = {
-  active:  { bg: '#d1fae5', text: '#065f46', label: 'Activo'  },
-  paused:  { bg: '#fef3c7', text: '#92400e', label: 'Pausado' },
-  error:   { bg: '#fee2e2', text: '#991b1b', label: 'Error'   },
+  active:   { bg: '#d1fae5', text: '#065f46', label: 'Activo'     },
+  paused:   { bg: '#fef3c7', text: '#92400e', label: 'Pausado'    },
+  error:    { bg: '#fee2e2', text: '#991b1b', label: 'Error'      },
+  finished: { bg: '#e5e7eb', text: '#374151', label: 'Finalizado' },
 }
 
 function StatusBadge({ status }: { status: IrrigationTurn['status'] }) {
@@ -36,17 +37,15 @@ function StatusBadge({ status }: { status: IrrigationTurn['status'] }) {
 
 // ── ETc progress bar ──────────────────────────────────────────────────────────
 
-function ETcBar({ accumulated, threshold }: { accumulated: number; threshold: number }) {
-  const pct = Math.min((accumulated / threshold) * 100, 100)
-  const color = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#10b981'
+function ETcBar({ accumulated }: { accumulated: number }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
         <span>ETc acumulada</span>
-        <span style={{ fontWeight: 600, color: '#374151' }}>{accumulated.toFixed(2)} / {threshold.toFixed(2)} mm</span>
+        <span style={{ fontWeight: 600, color: '#374151' }}>{accumulated.toFixed(2)} L</span>
       </div>
       <div style={{ height: 6, borderRadius: 4, background: '#e5e7eb', overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 4, transition: 'width 0.3s' }} />
+        <div style={{ height: '100%', width: '100%', background: '#10b981', borderRadius: 4 }} />
       </div>
     </div>
   )
@@ -69,19 +68,17 @@ function TurnHistoryDrawer({ turn, onClose }: { turn: IrrigationTurn; onClose: (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>{turn.name}</h3>
-            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{turn.crop} · {turn.kc_stage}</p>
+            <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6b7280' }}>{turn.crop} · {turn.kc_stage_active}</p>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#9ca3af', lineHeight: 1 }}>✕</button>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
           <Stat label="Días desde siembra" value={String(turn.days_since_sowing)} />
-          <Stat label="Etapa Kc" value={turn.kc_stage} />
-          <Stat label="Riegos hoy" value={`${turn.irrigations_today_count} (${turn.irrigations_today_mm.toFixed(1)} mm)`} />
+          <Stat label="Etapa Kc" value={turn.kc_stage_active} />
+          <Stat label="ETc acumulada (L)" value={turn.etc_accumulated_l.toFixed(2)} />
           <Stat label="Próximo riego" value={turn.next_irrigation_at ? new Date(turn.next_irrigation_at).toLocaleString() : '—'} />
         </div>
-
-        <ETcBar accumulated={turn.etc_accumulated_mm} threshold={turn.etc_threshold_mm} />
 
         <h4 style={{ margin: '24px 0 12px', fontSize: 14, fontWeight: 600, color: '#374151' }}>
           Historial planificado vs ejecutado vs observado
@@ -185,7 +182,7 @@ function NewTurnModal({ onClose }: { onClose: () => void }) {
           {field('Controlador', (
             <select style={inputStyle} value={form.controller_id} onChange={e => setForm(f => ({ ...f, controller_id: e.target.value }))} required>
               <option value="">Seleccionar...</option>
-              {controllers?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {controllers?.map(c => <option key={c.id} value={c.id}>{c.device_name}</option>)}
             </select>
           ))}
           {mutation.isError && <p style={{ margin: 0, color: '#991b1b', fontSize: 13 }}>Error al crear el turno.</p>}
@@ -221,9 +218,9 @@ function TurnCard({ turn, onClick }: { turn: IrrigationTurn; onClick: () => void
         <StatusBadge status={turn.status} />
       </div>
 
-      <ETcBar accumulated={turn.etc_accumulated_mm} threshold={turn.etc_threshold_mm} />
+      <ETcBar accumulated={turn.etc_accumulated_l} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14, fontSize: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 14, fontSize: 12 }}>
         <div>
           <div style={{ color: '#9ca3af' }}>Próximo riego</div>
           <div style={{ fontWeight: 600, color: '#374151', marginTop: 2 }}>
@@ -232,11 +229,7 @@ function TurnCard({ turn, onClick }: { turn: IrrigationTurn; onClick: () => void
         </div>
         <div>
           <div style={{ color: '#9ca3af' }}>Etapa Kc · días</div>
-          <div style={{ fontWeight: 600, color: '#374151', marginTop: 2 }}>{turn.kc_stage} · {turn.days_since_sowing}d</div>
-        </div>
-        <div>
-          <div style={{ color: '#9ca3af' }}>Riegos hoy</div>
-          <div style={{ fontWeight: 600, color: '#374151', marginTop: 2 }}>{turn.irrigations_today_count} · {turn.irrigations_today_mm.toFixed(1)} mm</div>
+          <div style={{ fontWeight: 600, color: '#374151', marginTop: 2 }}>{turn.kc_stage_active} · {turn.days_since_sowing}d</div>
         </div>
       </div>
     </div>

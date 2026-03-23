@@ -4,14 +4,11 @@ export interface IrrigationTurn {
   id: string
   name: string
   crop: string
-  status: 'active' | 'paused' | 'error'
-  etc_accumulated_mm: number
-  etc_threshold_mm: number
+  status: 'active' | 'paused' | 'error' | 'finished'
+  etc_accumulated_l: number
   next_irrigation_at: string | null
-  kc_stage: string
+  kc_stage_active: string
   days_since_sowing: number
-  irrigations_today_count: number
-  irrigations_today_mm: number
 }
 
 export interface TurnHistoryEntry {
@@ -36,10 +33,10 @@ export interface UpdateTurnData {
 
 export interface Controller {
   id: string
-  name: string
+  device_name: string
   sync_status: 'synced' | 'pending' | 'error'
   override_mode: 'none' | 'temporary_24h' | 'temporary_48h' | 'permanent'
-  last_heartbeat_at: string | null
+  last_seen_at: string | null
 }
 
 export interface Fogger {
@@ -56,13 +53,13 @@ export interface FoggerPreset {
 }
 
 export async function getIrrigationTurns(): Promise<IrrigationTurn[]> {
-  const { data } = await api.get<IrrigationTurn[]>('/dashboard/irrigation/turns')
-  return data
+  const { data } = await api.get<{ turns: IrrigationTurn[] }>('/dashboard/irrigation/turns')
+  return data.turns
 }
 
 export async function getTurnHistory(turnId: string): Promise<TurnHistoryEntry[]> {
-  const { data } = await api.get<TurnHistoryEntry[]>(`/dashboard/irrigation/turns/${turnId}/history`)
-  return data
+  const { data } = await api.get<{ history: TurnHistoryEntry[] }>(`/dashboard/irrigation/turns/${turnId}/history`)
+  return data.history
 }
 
 export async function createTurn(payload: CreateTurnData): Promise<IrrigationTurn> {
@@ -76,15 +73,15 @@ export async function updateTurn(turnId: string, payload: UpdateTurnData): Promi
 }
 
 export async function getControllers(): Promise<Controller[]> {
-  const { data } = await api.get<Controller[]>('/dashboard/controllers')
-  return data
+  const { data } = await api.get<{ controllers: Controller[] }>('/dashboard/controllers')
+  return data.controllers
 }
 
 export async function updateControllerOverride(
   controllerId: string,
   override_mode: Controller['override_mode']
 ): Promise<Controller> {
-  const { data } = await api.patch<Controller>(`/dashboard/controllers/${controllerId}`, { override_mode })
+  const { data } = await api.patch<Controller>(`/dashboard/controllers/${controllerId}/override`, { override_mode })
   return data
 }
 

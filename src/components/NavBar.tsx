@@ -3,7 +3,6 @@ import { NavLink } from 'react-router-dom'
 import { useAuth0 } from '@auth0/auth0-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { getOrganizations, impersonate } from '../services/settingsService'
-import { setAuthToken } from '../services/api'
 
 const ROLES_CLAIM = `${import.meta.env.VITE_AUTH0_AUDIENCE}/roles`
 
@@ -46,8 +45,7 @@ export default function NavBar() {
 
   const impersonateMutation = useMutation({
     mutationFn: () => impersonate(selectedOrg),
-    onSuccess: ({ token }) => {
-      setAuthToken(token)
+    onSuccess: () => {
       window.location.reload()
     },
   })

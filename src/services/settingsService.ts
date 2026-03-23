@@ -124,7 +124,10 @@ export async function getOrganizations(): Promise<Organization[]> {
   return data
 }
 
-export async function impersonate(orgId: string): Promise<{ token: string }> {
-  const { data } = await api.post<{ token: string }>('/dashboard/admin/impersonate', { org_id: orgId })
+export async function impersonate(orgId: string): Promise<{ ok: boolean; organization_id: string; note: string }> {
+  const { data } = await api.post<{ ok: boolean; organization_id: string; note: string }>(
+    '/dashboard/admin/impersonate',
+    { organization_id: orgId },
+  )
   return data
 }
