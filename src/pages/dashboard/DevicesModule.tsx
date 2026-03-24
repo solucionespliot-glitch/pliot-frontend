@@ -134,13 +134,13 @@ export default function DevicesModule() {
                   {formatLastSeen(device.last_seen_at)}
                 </td>
                 <td style={{ padding: '12px 16px', color: '#374151' }}>
-                  {device.temperature != null ? device.temperature.toFixed(1) : '—'}
+                  {device.temperature != null ? Number(device.temperature).toFixed(1) : '—'}
                 </td>
                 <td style={{ padding: '12px 16px', color: '#374151' }}>
-                  {device.humidity != null ? device.humidity.toFixed(1) : '—'}
+                  {device.humidity != null ? Number(device.humidity).toFixed(1) : '—'}
                 </td>
                 <td style={{ padding: '12px 16px', color: '#374151' }}>
-                  {device.battery_voltage != null ? device.battery_voltage.toFixed(2) : '—'}
+                  {device.battery_voltage != null ? Number(device.battery_voltage).toFixed(2) : '—'}
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   <StatusBadge online={isOnline(device)} />

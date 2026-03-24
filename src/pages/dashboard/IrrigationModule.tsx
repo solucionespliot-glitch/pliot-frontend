@@ -42,7 +42,7 @@ function ETcBar({ accumulated }: { accumulated: number }) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
         <span>ETc acumulada</span>
-        <span style={{ fontWeight: 600, color: '#374151' }}>{accumulated.toFixed(2)} L</span>
+        <span style={{ fontWeight: 600, color: '#374151' }}>{Number(accumulated).toFixed(2)} L</span>
       </div>
       <div style={{ height: 6, borderRadius: 4, background: '#e5e7eb', overflow: 'hidden' }}>
         <div style={{ height: '100%', width: '100%', background: '#10b981', borderRadius: 4 }} />
@@ -76,7 +76,7 @@ function TurnHistoryDrawer({ turn, onClose }: { turn: IrrigationTurn; onClose: (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
           <Stat label="Días desde siembra" value={String(turn.days_since_sowing)} />
           <Stat label="Etapa Kc" value={turn.kc_stage_active} />
-          <Stat label="ETc acumulada (L)" value={turn.etc_accumulated_l.toFixed(2)} />
+          <Stat label="ETc acumulada (L)" value={Number(turn.etc_accumulated_l).toFixed(2)} />
           <Stat label="Próximo riego" value={turn.next_irrigation_at ? new Date(turn.next_irrigation_at).toLocaleString() : '—'} />
         </div>
 
@@ -113,9 +113,9 @@ function TurnHistoryDrawer({ turn, onClose }: { turn: IrrigationTurn; onClose: (
                 {history.map((row: TurnHistoryEntry) => (
                   <tr key={row.date} style={{ borderBottom: '1px solid #f3f4f6' }}>
                     <td style={{ padding: '8px 12px', color: '#374151' }}>{row.date}</td>
-                    <td style={{ padding: '8px 12px', color: '#374151' }}>{row.planned_mm?.toFixed(2) ?? '—'}</td>
-                    <td style={{ padding: '8px 12px', color: '#374151' }}>{row.executed_mm?.toFixed(2) ?? '—'}</td>
-                    <td style={{ padding: '8px 12px', color: '#374151' }}>{row.observed_mm?.toFixed(2) ?? '—'}</td>
+                    <td style={{ padding: '8px 12px', color: '#374151' }}>{row.planned_mm != null ? Number(row.planned_mm).toFixed(2) : '—'}</td>
+                    <td style={{ padding: '8px 12px', color: '#374151' }}>{row.executed_mm != null ? Number(row.executed_mm).toFixed(2) : '—'}</td>
+                    <td style={{ padding: '8px 12px', color: '#374151' }}>{row.observed_mm != null ? Number(row.observed_mm).toFixed(2) : '—'}</td>
                   </tr>
                 ))}
               </tbody>

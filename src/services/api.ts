@@ -24,8 +24,8 @@ export function setupAuthInterceptor(getToken: () => Promise<string>) {
     try {
       const token = await getToken()
       config.headers['Authorization'] = `Bearer ${token}`
-    } catch {
-      // not authenticated — proceed without token
+    } catch (err) {
+      console.warn('[auth interceptor] getAccessTokenSilently failed:', err)
     }
     return config
   })

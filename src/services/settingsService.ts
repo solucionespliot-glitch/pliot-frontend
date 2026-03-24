@@ -43,8 +43,8 @@ export interface ContactPayload {
 }
 
 export async function getNotificationContacts(): Promise<NotificationContact[]> {
-  const { data } = await api.get<NotificationContact[]>('/dashboard/settings/notifications')
-  return data
+  const { data } = await api.get<{ contacts: NotificationContact[] }>('/dashboard/settings/notifications')
+  return data.contacts
 }
 
 export async function createContact(payload: ContactPayload): Promise<NotificationContact> {

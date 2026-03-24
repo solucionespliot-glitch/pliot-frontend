@@ -8,7 +8,9 @@ import { router } from './router'
 import { setupAuthInterceptor } from './services/api'
 import './index.css'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: 1 } },
+})
 
 // Wires Auth0 token into axios on every request
 function AuthSetup({ children }: { children: React.ReactNode }) {
@@ -37,7 +39,10 @@ createRoot(document.getElementById('root')!).render(
       authorizationParams={{
         redirect_uri: window.location.origin,
         audience: import.meta.env.VITE_AUTH0_AUDIENCE,
+        scope: 'openid profile email offline_access',
       }}
+      useRefreshTokens={true}
+      cacheLocation="localstorage"
     >
       <QueryClientProvider client={queryClient}>
         <SiteProvider>
