@@ -16,8 +16,8 @@ export interface CreateAnnotationData {
 }
 
 export async function getAnnotations(deviceId: string): Promise<Annotation[]> {
-  const { data } = await api.get<Annotation[]>(`/dashboard/devices/${deviceId}/annotations`)
-  return data
+  const { data } = await api.get(`/dashboard/devices/${deviceId}/annotations`)
+  return Array.isArray(data) ? data : (data?.annotations ?? [])
 }
 
 export async function createAnnotation(

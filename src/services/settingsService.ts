@@ -85,8 +85,8 @@ export interface AddDevicePayload {
 }
 
 export async function getSettingsDevices(): Promise<SettingsDevice[]> {
-  const { data } = await api.get<SettingsDevice[]>('/dashboard/settings/devices')
-  return data
+  const { data } = await api.get('/dashboard/settings/devices')
+  return Array.isArray(data) ? data : (data?.devices ?? [])
 }
 
 export async function getDeviceQuota(): Promise<DeviceQuota> {
@@ -115,13 +115,13 @@ export interface Organization {
 }
 
 export async function getSecurityAlerts(): Promise<SecurityAlert[]> {
-  const { data } = await api.get<SecurityAlert[]>('/dashboard/admin/security-alerts')
-  return data
+  const { data } = await api.get('/dashboard/admin/security-alerts')
+  return Array.isArray(data) ? data : (data?.alerts ?? [])
 }
 
 export async function getOrganizations(): Promise<Organization[]> {
-  const { data } = await api.get<Organization[]>('/dashboard/admin/organizations')
-  return data
+  const { data } = await api.get('/dashboard/admin/organizations')
+  return Array.isArray(data) ? data : (data?.organizations ?? [])
 }
 
 export async function impersonate(orgId: string): Promise<{ ok: boolean; organization_id: string; note: string }> {

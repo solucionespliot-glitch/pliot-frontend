@@ -14,19 +14,30 @@ const queryClient = new QueryClient({
 
 // Wires Auth0 token into axios on every request
 function AuthSetup({ children }: { children: React.ReactNode }) {
-  const { getAccessTokenSilently, isAuthenticated } = useAuth0()
+  const { getAccessTokenSilently, isAuthenticated, loginWithRedirect } = useAuth0()
 
   useEffect(() => {
     if (isAuthenticated) {
-      setupAuthInterceptor(() =>
-        getAccessTokenSilently({
-          authorizationParams: {
-            audience: import.meta.env.VITE_AUTH0_AUDIENCE,
-          },
-        }),
-      )
+      setupAuthInterceptor(async () => {
+        try {
+          return await getAccessTokenSilently({
+            authorizationParams: {
+              audience: import.meta.env.VITE_AUTH0_AUDIENCE,
+            },
+          })
+        } catch (err) {
+          console.warn('[auth interceptor] token refresh failed, redirecting to login:', err)
+          await loginWithRedirect({
+            authorizationParams: {
+              audience: import.meta.env.VITE_AUTH0_AUDIENCE,
+              scope: 'openid profile email offline_access',
+            },
+          })
+          throw err
+        }
+      })
     }
-  }, [isAuthenticated, getAccessTokenSilently])
+  }, [isAuthenticated, getAccessTokenSilently, loginWithRedirect])
 
   return <>{children}</>
 }
@@ -42,6 +53,7 @@ createRoot(document.getElementById('root')!).render(
         scope: 'openid profile email offline_access',
       }}
       useRefreshTokens={true}
+      useRefreshTokensFallbackToWeb={true}
       cacheLocation="localstorage"
     >
       <QueryClientProvider client={queryClient}>
