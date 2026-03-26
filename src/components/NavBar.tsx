@@ -3,8 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { useAuth0 } from '@auth0/auth0-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { getOrganizations, impersonate } from '../services/settingsService'
-
-const ROLES_CLAIM = `${import.meta.env.VITE_AUTH0_AUDIENCE}/roles`
+import { setImpersonateOrg, fetchMe } from '../services/api'
 
 const NAV_LINKS = [
   { to: '/dashboard/devices',     label: 'Dispositivos'  },
@@ -32,10 +31,10 @@ const linkStyle: React.CSSProperties = {
 
 export default function NavBar() {
   const { user, logout } = useAuth0()
-  const [selectedOrg, setSelectedOrg] = useState('')
+  const [selectedOrg, setSelectedOrg] = useState(() => sessionStorage.getItem('impersonateOrg') ?? '')
 
-  const userRoles: string[] = (user?.[ROLES_CLAIM] as string[]) ?? []
-  const isSuperuser = userRoles.includes('superuser')
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
+  const isSuperuser = me?.role === 'superuser'
 
   const { data: orgs = [] } = useQuery({
     queryKey: ['organizations'],
@@ -45,10 +44,17 @@ export default function NavBar() {
 
   const impersonateMutation = useMutation({
     mutationFn: () => impersonate(selectedOrg),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      setImpersonateOrg(data.organization_id)
       window.location.reload()
     },
   })
+
+  function clearImpersonation() {
+    setImpersonateOrg(null)
+    setSelectedOrg('')
+    window.location.reload()
+  }
 
   return (
     <nav style={{
@@ -92,7 +98,7 @@ export default function NavBar() {
               onChange={e => setSelectedOrg(e.target.value)}
               style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, maxWidth: 160 }}
             >
-              <option value="">Impersonar org...</option>
+              <option value="">Mi org (defecto)</option>
               {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
             <button
@@ -106,8 +112,20 @@ export default function NavBar() {
                 cursor: !selectedOrg ? 'not-allowed' : 'pointer',
               }}
             >
-              {impersonateMutation.isPending ? '...' : 'OK'}
+              {impersonateMutation.isPending ? '...' : 'Ver'}
             </button>
+            {sessionStorage.getItem('impersonateOrg') && (
+              <button
+                onClick={clearImpersonation}
+                title="Volver a mi org"
+                style={{
+                  padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb',
+                  background: '#fff', color: '#374151', fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                Limpiar
+              </button>
+            )}
           </div>
         )}
 

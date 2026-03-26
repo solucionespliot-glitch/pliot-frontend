@@ -5,8 +5,10 @@ import { RouterProvider } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SiteProvider } from './hooks/useSiteContext'
 import { router } from './router'
-import { setupAuthInterceptor } from './services/api'
+import { setupAuthInterceptor, restoreImpersonateOrg } from './services/api'
 import './index.css'
+
+restoreImpersonateOrg()
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1 } },

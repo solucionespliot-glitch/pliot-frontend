@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -34,16 +34,45 @@ interface VarConfig {
   unit: string
   color: string
   icon: string
+  iconEl?: React.ReactNode
   yAxisId: string
   orientation: 'left' | 'right'
+  sidePanelHidden?: boolean
+}
+
+function BatteryIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="7" width="16" height="10" rx="2" />
+      <line x1="22" y1="11" x2="22" y2="13" strokeWidth="3" />
+      <rect x="4" y="9" width="9" height="6" rx="1" fill="#10b981" stroke="none" />
+    </svg>
+  )
+}
+
+function vpdColor(value: number | null | undefined): string {
+  if (value == null) return '#9ca3af'
+  if (value < 0.2)  return '#ef4444'  // rojo — muy bajo
+  if (value <= 1.2) return '#22c55e'  // verde — óptimo
+  if (value <= 2.0) return '#eab308'  // amarillo — alto
+  return '#ef4444'                     // rojo — muy alto
+}
+
+function vpdLabel(value: number | null | undefined): string {
+  if (value == null) return '—'
+  if (value < 0.2)  return 'Muy bajo'
+  if (value <= 1.2) return 'Óptimo'
+  if (value <= 2.0) return 'Alto'
+  return 'Muy alto'
 }
 
 const VARIABLES: VarConfig[] = [
-  { key: 'temperature',     label: 'Temperatura', unit: '°C',   color: '#f97316', icon: '/icono-temp.png',     yAxisId: 'temp', orientation: 'left' },
-  { key: 'humidity',        label: 'Humedad',      unit: '%',    color: '#3b82f6', icon: '/icono-hum.png',      yAxisId: 'hum',  orientation: 'right' },
-  { key: 'light',           label: 'Luz',          unit: ' lux', color: '#eab308', icon: '/icono-luxLevel.png', yAxisId: 'lux',  orientation: 'left' },
-  { key: 'vpd',             label: 'DPV',          unit: ' kPa', color: '#8b5cf6', icon: '/icono-dewpoint.png', yAxisId: 'vpd',  orientation: 'right' },
-  { key: 'battery_voltage', label: 'Batería',      unit: ' V',   color: '#10b981', icon: '/icono-bucket.png',   yAxisId: 'bat',  orientation: 'left' },
+  { key: 'temperature',     label: 'Temperatura',  unit: '°C',   color: '#f97316', icon: '/icono-temp.png',     yAxisId: 'temp', orientation: 'left' },
+  { key: 'humidity',        label: 'Humedad',       unit: '%',    color: '#3b82f6', icon: '/icono-hum.png',      yAxisId: 'hum',  orientation: 'right' },
+  { key: 'light',           label: 'Luz',           unit: ' lux', color: '#eab308', icon: '/icono-luxLevel.png', yAxisId: 'lux',  orientation: 'left' },
+  { key: 'dew_point',       label: 'Pto. Rocío',    unit: '°C',   color: '#06b6d4', icon: '/icono-dewpoint.png', yAxisId: 'dew',  orientation: 'right' },
+  { key: 'vpd',             label: 'DPV',           unit: ' kPa', color: '#8b5cf6', icon: '/icono-dewpoint.png', yAxisId: 'vpd',  orientation: 'left',  sidePanelHidden: true },
+  { key: 'battery_voltage', label: 'Batería',       unit: ' V',   color: '#10b981', icon: '',                    iconEl: <BatteryIcon />, yAxisId: 'bat', orientation: 'right' },
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -149,6 +178,8 @@ function VarToggle({ v, active, onClick }: { v: VarConfig; active: boolean; onCl
 
 function MetricCard({ v, value }: { v: VarConfig; value: number | null | undefined }) {
   const display = value != null ? Number(value).toFixed(1) : '—'
+  const isVpd = v.key === 'vpd'
+  const semColor = isVpd ? vpdColor(value) : null
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -156,14 +187,20 @@ function MetricCard({ v, value }: { v: VarConfig; value: number | null | undefin
       padding: '10px 14px', minHeight: 64,
     }}>
       <div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{v.label}</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{v.label}</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
           <span style={{ fontSize: 20, fontWeight: 500, color: '#111827' }}>{display}</span>
           <span style={{ fontSize: 14, fontWeight: 500, color: '#6b7280' }}>{v.unit.trim()}</span>
+          {semColor && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 2 }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: semColor, display: 'inline-block' }} />
+              <span style={{ fontSize: 12, color: semColor, fontWeight: 600 }}>{vpdLabel(value)}</span>
+            </span>
+          )}
         </div>
       </div>
       <div style={{ background: '#f9fafb', borderRadius: '50%', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <img src={v.icon} alt={v.label} style={{ height: 26, width: 26, objectFit: 'contain' }} />
+        {v.iconEl ?? <img src={v.icon} alt={v.label} style={{ height: 26, width: 26, objectFit: 'contain' }} />}
       </div>
     </div>
   )
@@ -264,11 +301,44 @@ export default function TelemetryModule() {
     new Date(queryTo).getTime(),
   ]
 
+  // ── Wheel zoom state ──────────────────────────────────────────────────────
+  const [zoomDomain, setZoomDomain] = useState<[number, number] | null>(null)
+  const chartWrapperRef = useRef<HTMLDivElement>(null)
+
+  // Reset zoom whenever the query range changes
+  useEffect(() => { setZoomDomain(null) }, [queryFrom, queryTo])
+
+  const effectiveDomain: [number, number] = zoomDomain ?? xDomain
+
+  function handleWheel(e: WheelEvent) {
+    e.preventDefault()
+    const [start, end] = zoomDomain ?? xDomain
+    const span = end - start
+    const center = (start + end) / 2
+    const factor = e.deltaY > 0 ? 1.7 : 0.55   // scroll down = zoom out, up = zoom in
+    const newSpan = Math.min(
+      Math.max(span * factor, 30 * 60 * 1000),   // min 30 min
+      xDomain[1] - xDomain[0],                   // max full range
+    )
+    let s = center - newSpan / 2
+    let t = center + newSpan / 2
+    if (s < xDomain[0]) { s = xDomain[0]; t = s + newSpan }
+    if (t > xDomain[1]) { t = xDomain[1]; s = t - newSpan }
+    setZoomDomain([s, t])
+  }
+
+  useEffect(() => {
+    const el = chartWrapperRef.current
+    if (!el) return
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  })
+
   const xAxisProps = {
     dataKey: 'ts' as const,
     type: 'number' as const,
     scale: 'time' as const,
-    domain: xDomain,
+    domain: effectiveDomain,
     tickFormatter,
     tick: { fontSize: 11 },
     minTickGap: 40,
@@ -388,7 +458,8 @@ export default function TelemetryModule() {
           {/* Combined chart */}
           {data && data.length > 0 && enabledVars.length > 0 && viewMode === 'combined' && (
             <ChartCard title="Telemetría">
-              <ResponsiveContainer width="100%" height={320}>
+              <div ref={chartWrapperRef} style={{ userSelect: 'none' }}>
+              <ResponsiveContainer width="100%" height={500}>
                 <LineChart data={data} margin={{ top: 8, right: 54, left: 4, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                   <XAxis {...xAxisProps} />
@@ -412,6 +483,7 @@ export default function TelemetryModule() {
                   ))}
                 </LineChart>
               </ResponsiveContainer>
+              </div>
             </ChartCard>
           )}
 
@@ -439,7 +511,7 @@ export default function TelemetryModule() {
         </div>
 
         {/* Right: side panel */}
-        <div style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
 
           {/* Device header card */}
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px' }}>
@@ -448,13 +520,23 @@ export default function TelemetryModule() {
             </div>
             {latest && (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block', flexShrink: 0 }} />
                   <span style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>Enlace activo</span>
+                  <span style={{ fontSize: 12, color: '#9ca3af' }}>· {formatRelative(latest.timestamp)}</span>
                 </div>
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                  {formatRelative(latest.timestamp)}
-                </div>
+                {/* DPV semáforo destacado */}
+                {(latest as any).vpd != null && (() => {
+                  const vpd = (latest as any).vpd as number
+                  const col = vpdColor(vpd)
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: col + '18', borderRadius: 8, padding: '6px 10px' }}>
+                      <span style={{ width: 12, height: 12, borderRadius: '50%', background: col, display: 'inline-block', flexShrink: 0 }} />
+                      <span style={{ fontSize: 13, fontWeight: 700, color: col }}>DPV: {Number(vpd).toFixed(2)} kPa</span>
+                      <span style={{ fontSize: 12, color: col, marginLeft: 'auto' }}>{vpdLabel(vpd)}</span>
+                    </div>
+                  )
+                })()}
               </>
             )}
             {!latest && !isLoading && (
@@ -463,7 +545,7 @@ export default function TelemetryModule() {
           </div>
 
           {/* Metric cards */}
-          {VARIABLES.map(v => (
+          {VARIABLES.filter(v => !v.sidePanelHidden).map(v => (
             <MetricCard key={v.key} v={v} value={(latest as any)?.[v.key]} />
           ))}
         </div>
