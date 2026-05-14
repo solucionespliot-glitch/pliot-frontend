@@ -20,10 +20,11 @@ type ViewMode = 'combined' | 'separated'
 // ── Range presets ─────────────────────────────────────────────────────────────
 
 const RANGES = [
-  { label: '24 hs', hours: 24 },
-  { label: '72 hs', hours: 72 },
+  { label: '1 hs',   hours: 1   },
+  { label: '24 hs',  hours: 24  },
+  { label: '72 hs',  hours: 72  },
   { label: '7 días', hours: 168 },
-  { label: '15 días', hours: 360 },
+  { label: '15 días',hours: 360 },
 ] as const
 
 // ── Variables config ──────────────────────────────────────────────────────────
@@ -37,6 +38,7 @@ interface VarConfig {
   iconEl?: React.ReactNode
   yAxisId: string
   orientation: 'left' | 'right'
+  domain?: [number | string, number | string]
   sidePanelHidden?: boolean
 }
 
@@ -54,7 +56,7 @@ function vpdColor(value: number | null | undefined): string {
   if (value == null) return '#9ca3af'
   if (value < 0.2)  return '#ef4444'  // rojo — muy bajo
   if (value <= 1.2) return '#22c55e'  // verde — óptimo
-  if (value <= 2.0) return '#eab308'  // amarillo — alto
+  if (value <= 2.0) return '#facc15'  // amarillo — alto
   return '#ef4444'                     // rojo — muy alto
 }
 
@@ -68,10 +70,10 @@ function vpdLabel(value: number | null | undefined): string {
 
 const VARIABLES: VarConfig[] = [
   { key: 'temperature',     label: 'Temperatura',  unit: '°C',   color: '#f97316', icon: '/icono-temp.png',     yAxisId: 'temp', orientation: 'left' },
-  { key: 'humidity',        label: 'Humedad',       unit: '%',    color: '#3b82f6', icon: '/icono-hum.png',      yAxisId: 'hum',  orientation: 'right' },
-  { key: 'light',           label: 'Luz',           unit: ' lux', color: '#eab308', icon: '/icono-luxLevel.png', yAxisId: 'lux',  orientation: 'left' },
+  { key: 'humidity',        label: 'Humedad',       unit: '%',    color: '#3b82f6', icon: '/icono-hum.png',      yAxisId: 'hum',  orientation: 'right', domain: [0, 100] },
+  { key: 'light',           label: 'Luz',           unit: ' lux', color: '#facc15', icon: '/icono-luxLevel.png', yAxisId: 'lux',  orientation: 'left' },
   { key: 'dew_point',       label: 'Pto. Rocío',    unit: '°C',   color: '#06b6d4', icon: '/icono-dewpoint.png', yAxisId: 'dew',  orientation: 'right' },
-  { key: 'vpd',             label: 'DPV',           unit: ' kPa', color: '#8b5cf6', icon: '/icono-dewpoint.png', yAxisId: 'vpd',  orientation: 'left',  sidePanelHidden: true },
+  { key: 'vpd',             label: 'DPV',           unit: ' kPa', color: '#8b5cf6', icon: '/icono-dewpoint.png', yAxisId: 'vpd',  orientation: 'left',  domain: [0, 15], sidePanelHidden: true },
   { key: 'battery_voltage', label: 'Batería',       unit: ' V',   color: '#10b981', icon: '',                    iconEl: <BatteryIcon />, yAxisId: 'bat', orientation: 'right' },
 ]
 
@@ -139,12 +141,21 @@ function annotationLines(annotations: Annotation[]) {
 
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
+
+  // Deduplicate VPD segments — show only the first non-null entry named "DPV"
+  const seen = new Set<string>()
+  const filtered = payload.filter((p: any) => {
+    if (seen.has(p.name)) return false
+    seen.add(p.name)
+    return true
+  })
+
   return (
     <div style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8, padding: '10px 14px', minWidth: 180 }}>
       <p style={{ margin: '0 0 8px', fontSize: 12, color: '#9ca3af' }}>
         {new Date(label).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
       </p>
-      {payload.map((p: any) => (
+      {filtered.map((p: any) => (
         <div key={p.dataKey} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: p.color, display: 'inline-block', flexShrink: 0 }} />
           <span style={{ color: '#e5e7eb', fontSize: 13 }}>{p.name}:</span>
@@ -157,52 +168,32 @@ function CustomTooltip({ active, payload, label }: any) {
   )
 }
 
-// ── Variable toggle button ────────────────────────────────────────────────────
+// ── Variable toggle button (with latest value) ───────────────────────────────
 
-function VarToggle({ v, active, onClick }: { v: VarConfig; active: boolean; onClick: () => void }) {
+function VarToggle({ v, active, onClick, latestValue }: { v: VarConfig; active: boolean; onClick: () => void; latestValue?: number | null }) {
+  const display = latestValue != null ? Number(latestValue).toFixed(1) : '—'
+  const isVpd = v.key === 'vpd'
+  const valueColor = isVpd ? vpdColor(latestValue) : (active ? v.color : '#374151')
+
   return (
     <button onClick={onClick} style={{
-      display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px',
-      borderRadius: 20, border: `2px solid ${active ? v.color : '#d1d5db'}`,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+      padding: '10px 14px', minWidth: 88,
+      borderRadius: 10, border: `2px solid ${active ? v.color : '#d1d5db'}`,
       background: active ? v.color + '18' : '#f9fafb',
-      cursor: 'pointer', fontSize: 13, fontWeight: 500,
-      color: active ? v.color : '#6b7280', transition: 'all 0.15s',
+      cursor: 'pointer', transition: 'all 0.15s',
     }}>
-      <img src={v.icon} alt={v.label} style={{ width: 18, height: 18, opacity: active ? 1 : 0.4 }} />
-      {v.label}
+      <div style={{ opacity: active ? 1 : 0.4 }}>
+        {v.iconEl ?? <img src={v.icon} alt={v.label} style={{ width: 26, height: 26, objectFit: 'contain' }} />}
+      </div>
+      <span style={{ fontSize: 11, fontWeight: 500, color: active ? v.color : '#6b7280' }}>{v.label}</span>
+      <span style={{ fontSize: 15, fontWeight: 700, color: valueColor }}>
+        {display}<span style={{ fontSize: 11, fontWeight: 400, marginLeft: 2 }}>{latestValue != null ? v.unit.trim() : ''}</span>
+      </span>
+      {isVpd && latestValue != null && (
+        <span style={{ fontSize: 10, fontWeight: 600, color: vpdColor(latestValue) }}>{vpdLabel(latestValue)}</span>
+      )}
     </button>
-  )
-}
-
-// ── Side panel metric card ────────────────────────────────────────────────────
-
-function MetricCard({ v, value }: { v: VarConfig; value: number | null | undefined }) {
-  const display = value != null ? Number(value).toFixed(1) : '—'
-  const isVpd = v.key === 'vpd'
-  const semColor = isVpd ? vpdColor(value) : null
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      background: '#fff', border: '1px solid #e6e9f0', borderRadius: 10,
-      padding: '10px 14px', minHeight: 64,
-    }}>
-      <div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{v.label}</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontSize: 20, fontWeight: 500, color: '#111827' }}>{display}</span>
-          <span style={{ fontSize: 14, fontWeight: 500, color: '#6b7280' }}>{v.unit.trim()}</span>
-          {semColor && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 2 }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: semColor, display: 'inline-block' }} />
-              <span style={{ fontSize: 12, color: semColor, fontWeight: 600 }}>{vpdLabel(value)}</span>
-            </span>
-          )}
-        </div>
-      </div>
-      <div style={{ background: '#f9fafb', borderRadius: '50%', width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        {v.iconEl ?? <img src={v.icon} alt={v.label} style={{ height: 26, width: 26, objectFit: 'contain' }} />}
-      </div>
-    </div>
   )
 }
 
@@ -210,10 +201,10 @@ function MetricCard({ v, value }: { v: VarConfig; value: number | null | undefin
 
 function ChartCard({ title, icon, children }: { title: string; icon?: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '16px 20px' }}>
+    <div style={{ background: 'var(--p-surface)', borderRadius: 'var(--p-radius-card)', border: '1px solid var(--p-border)', padding: '16px 20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         {icon && <img src={icon} alt="" style={{ width: 20, height: 20 }} />}
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#374151' }}>{title}</h3>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--p-text-secondary)' }}>{title}</h3>
       </div>
       {children}
     </div>
@@ -283,10 +274,43 @@ export default function TelemetryModule() {
     enabled: !!deviceId,
   })
 
-  const data = useMemo(
-    () => rawData?.map(d => ({ ...d, ts: new Date(d.timestamp).getTime() })),
-    [rawData]
-  )
+  const data = useMemo(() => {
+    if (!rawData) return undefined
+    return rawData.map((d, i, arr) => {
+      const base = { ...d, ts: new Date(d.timestamp).getTime() }
+      const vpd = d.vpd as number | null | undefined
+      let vpd_green: number | null = null
+      let vpd_yellow: number | null = null
+      let vpd_red: number | null = null
+
+      if (vpd != null) {
+        const col = vpdColor(vpd)
+        if (col === '#22c55e') vpd_green = vpd
+        else if (col === '#facc15') vpd_yellow = vpd
+        else vpd_red = vpd
+
+        // At color boundaries include this point in the adjacent segment too,
+        // so the two segments connect without a gap.
+        const prevVpd = arr[i - 1]?.vpd as number | null | undefined
+        const nextVpd = arr[i + 1]?.vpd as number | null | undefined
+
+        if (prevVpd != null && vpdColor(prevVpd) !== col) {
+          const pc = vpdColor(prevVpd)
+          if (pc === '#22c55e') vpd_green = vpd
+          else if (pc === '#facc15') vpd_yellow = vpd
+          else vpd_red = vpd
+        }
+        if (nextVpd != null && vpdColor(nextVpd) !== col) {
+          const nc = vpdColor(nextVpd)
+          if (nc === '#22c55e') vpd_green = vpd
+          else if (nc === '#facc15') vpd_yellow = vpd
+          else vpd_red = vpd
+        }
+      }
+
+      return { ...base, vpd_green, vpd_yellow, vpd_red }
+    })
+  }, [rawData])
 
   // Latest reading (last data point)
   const latest = data && data.length > 0 ? data[data.length - 1] : null
@@ -310,29 +334,38 @@ export default function TelemetryModule() {
 
   const effectiveDomain: [number, number] = zoomDomain ?? xDomain
 
-  function handleWheel(e: WheelEvent) {
+  // Refs para que el handler siempre lea los valores actuales sin stale closure
+  const zoomDomainRef = useRef<[number, number] | null>(null)
+  const xDomainRef    = useRef<[number, number]>(xDomain)
+  zoomDomainRef.current = zoomDomain
+  xDomainRef.current    = xDomain
+
+  const handleWheelRef = useRef<(e: WheelEvent) => void>(() => {})
+  handleWheelRef.current = (e: WheelEvent) => {
     e.preventDefault()
-    const [start, end] = zoomDomain ?? xDomain
-    const span = end - start
+    const [start, end] = zoomDomainRef.current ?? xDomainRef.current
+    const span   = end - start
     const center = (start + end) / 2
-    const factor = e.deltaY > 0 ? 1.7 : 0.55   // scroll down = zoom out, up = zoom in
+    const factor = e.deltaY > 0 ? 2.5 : 0.4   // scroll down = zoom out, up = zoom in
     const newSpan = Math.min(
-      Math.max(span * factor, 30 * 60 * 1000),   // min 30 min
-      xDomain[1] - xDomain[0],                   // max full range
+      Math.max(span * factor, 30 * 60 * 1000), // min 30 min
+      xDomainRef.current[1] - xDomainRef.current[0],
     )
     let s = center - newSpan / 2
     let t = center + newSpan / 2
-    if (s < xDomain[0]) { s = xDomain[0]; t = s + newSpan }
-    if (t > xDomain[1]) { t = xDomain[1]; s = t - newSpan }
+    if (s < xDomainRef.current[0]) { s = xDomainRef.current[0]; t = s + newSpan }
+    if (t > xDomainRef.current[1]) { t = xDomainRef.current[1]; s = t - newSpan }
     setZoomDomain([s, t])
   }
 
+  // Registro estable: el listener apunta siempre al ref, nunca se re-registra
   useEffect(() => {
     const el = chartWrapperRef.current
     if (!el) return
-    el.addEventListener('wheel', handleWheel, { passive: false })
-    return () => el.removeEventListener('wheel', handleWheel)
-  })
+    const handler = (e: WheelEvent) => handleWheelRef.current(e)
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [])
 
   const xAxisProps = {
     dataKey: 'ts' as const,
@@ -349,56 +382,76 @@ export default function TelemetryModule() {
   const rightAxes    = enabledVars.filter(v => v.orientation === 'right')
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: '20px 20px 32px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         <button onClick={() => navigate('/dashboard/devices')}
-          style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 14, color: '#374151' }}>
+          style={{ background: 'none', border: '1px solid var(--p-border)', borderRadius: 'var(--p-radius-btn)', padding: '6px 12px', cursor: 'pointer', fontSize: 14, color: 'var(--p-text-secondary)' }}>
           ← Volver
         </button>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: '#111827', fontFamily: 'monospace' }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--p-text)' }}>
           {deviceId}
         </h2>
+        {latest && (
+          <>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
+              <span style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>Enlace activo</span>
+              <span style={{ fontSize: 12, color: '#9ca3af' }}>· {formatRelative(latest.timestamp)}</span>
+            </span>
+            {(latest as any).vpd != null && (() => {
+              const vpd = (latest as any).vpd as number
+              const col = vpdColor(vpd)
+              return (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: col + '18', borderRadius: 8, padding: '4px 10px' }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: col, display: 'inline-block' }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: col }}>DPV: {Number(vpd).toFixed(2)} kPa</span>
+                  <span style={{ fontSize: 12, color: col }}>{vpdLabel(vpd)}</span>
+                </span>
+              )
+            })()}
+          </>
+        )}
         {isFetching && (
-          <span style={{ fontSize: 12, color: '#6366f1', marginLeft: 4 }}>● actualizando...</span>
+          <span style={{ fontSize: 12, color: 'var(--p-primary)', marginLeft: 4 }}>● actualizando...</span>
         )}
       </div>
 
-      {/* Main layout: chart area + side panel */}
+      {/* Main layout: full width */}
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
 
-        {/* Left: controls + chart */}
+        {/* Chart area — full width */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Controls bar */}
-          <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb', padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+          <div style={{ background: 'var(--p-surface)', borderRadius: 'var(--p-radius-card)', border: '1px solid var(--p-border)', padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
 
             {/* Quick range */}
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {RANGES.map(r => (
                 <button key={r.hours} onClick={() => applyRange(r.hours)} style={{
                   padding: '5px 14px', borderRadius: 20, fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                  border: selectedHours === r.hours ? '2px solid #6366f1' : '1px solid #d1d5db',
-                  background: selectedHours === r.hours ? '#6366f118' : '#f9fafb',
-                  color: selectedHours === r.hours ? '#6366f1' : '#374151',
+                  border: selectedHours === r.hours ? `2px solid var(--p-primary)` : '1px solid var(--p-border)',
+                  background: selectedHours === r.hours ? '#2EB82A18' : 'var(--p-bg)',
+                  color: selectedHours === r.hours ? 'var(--p-primary-dark)' : 'var(--p-text-secondary)',
                 }}>
                   {r.label}
                 </button>
               ))}
             </div>
 
-            <div style={{ width: 1, height: 24, background: '#e5e7eb' }} />
+            <div style={{ width: 1, height: 24, background: 'var(--p-border)' }} />
 
             {/* Custom dates */}
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               <input type="datetime-local" value={from} onChange={e => { setFrom(e.target.value); setSelectedHours(0) }}
-                style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} />
-              <span style={{ color: '#9ca3af', fontSize: 13 }}>→</span>
+                style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--p-border)', fontSize: 13, color: 'var(--p-text)', background: 'var(--p-bg)' }} />
+              <span style={{ color: 'var(--p-text-muted)', fontSize: 13 }}>→</span>
               <input type="datetime-local" value={to} onChange={e => { setTo(e.target.value); setSelectedHours(0) }}
-                style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13 }} />
+                style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--p-border)', fontSize: 13, color: 'var(--p-text)', background: 'var(--p-bg)' }} />
               <button onClick={handleApply} style={{
-                padding: '5px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                border: 'none', background: '#6366f1', color: '#fff',
+                padding: '5px 16px', borderRadius: 'var(--p-radius-btn)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                border: 'none', background: 'var(--p-primary)', color: '#fff',
               }}>
                 Buscar
               </button>
@@ -408,9 +461,9 @@ export default function TelemetryModule() {
               {(['combined', 'separated'] as ViewMode[]).map(m => (
                 <button key={m} onClick={() => setViewMode(m)} style={{
                   padding: '5px 12px', borderRadius: 20, fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                  border: viewMode === m ? '2px solid #6366f1' : '1px solid #d1d5db',
-                  background: viewMode === m ? '#6366f118' : '#f9fafb',
-                  color: viewMode === m ? '#6366f1' : '#374151',
+                  border: viewMode === m ? `2px solid var(--p-primary)` : '1px solid var(--p-border)',
+                  background: viewMode === m ? '#2EB82A18' : 'var(--p-bg)',
+                  color: viewMode === m ? 'var(--p-primary-dark)' : 'var(--p-text-secondary)',
                 }}>
                   {m === 'combined' ? '⊞ Combinado' : '⊟ Separado'}
                 </button>
@@ -418,16 +471,17 @@ export default function TelemetryModule() {
             </div>
           </div>
 
-          {/* Variable toggles */}
+          {/* Variable toggles with latest values */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {VARIABLES.map(v => (
-              <VarToggle key={v.key} v={v} active={activeVars.has(v.key)} onClick={() => toggleVar(v.key)} />
+              <VarToggle key={v.key} v={v} active={activeVars.has(v.key)} onClick={() => toggleVar(v.key)}
+                latestValue={(latest as any)?.[v.key]} />
             ))}
           </div>
 
           {/* Data info */}
           {data && (
-            <div style={{ fontSize: 12, color: '#9ca3af', paddingLeft: 2 }}>
+            <div style={{ fontSize: 12, color: 'var(--p-text-muted)', paddingLeft: 2 }}>
               {data.length} puntos ·{' '}
               {new Date(queryFrom).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
               {' → '}
@@ -442,17 +496,17 @@ export default function TelemetryModule() {
           )}
 
           {isLoading && (
-            <div style={{ color: '#6b7280', padding: 32, textAlign: 'center' }}>Cargando telemetría...</div>
+            <div style={{ color: 'var(--p-text-secondary)', padding: 32, textAlign: 'center' }}>Cargando telemetría...</div>
           )}
 
           {!isLoading && data?.length === 0 && (
-            <div style={{ color: '#9ca3af', padding: 32, textAlign: 'center', background: '#fff', borderRadius: 10, border: '1px solid #e5e7eb' }}>
+            <div style={{ color: 'var(--p-text-muted)', padding: 32, textAlign: 'center', background: 'var(--p-surface)', borderRadius: 'var(--p-radius-card)', border: '1px solid var(--p-border)' }}>
               Sin datos para el rango seleccionado.
             </div>
           )}
 
           {data && data.length > 0 && enabledVars.length === 0 && (
-            <div style={{ color: '#9ca3af', padding: 32, textAlign: 'center' }}>Seleccioná al menos una variable.</div>
+            <div style={{ color: 'var(--p-text-muted)', padding: 32, textAlign: 'center' }}>Seleccioná al menos una variable.</div>
           )}
 
           {/* Combined chart */}
@@ -460,27 +514,34 @@ export default function TelemetryModule() {
             <ChartCard title="Telemetría">
               <div ref={chartWrapperRef} style={{ userSelect: 'none' }}>
               <ResponsiveContainer width="100%" height={500}>
-                <LineChart data={data} margin={{ top: 8, right: 54, left: 4, bottom: 0 }}>
+                <LineChart data={data} margin={{ top: 8, right: 96, left: 48, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                   <XAxis {...xAxisProps} />
-                  {leftAxes.map((v, i) => (
+                  {leftAxes.map((v) => (
                     <YAxis key={v.yAxisId} yAxisId={v.yAxisId} orientation="left"
-                      unit={v.unit} tick={{ fontSize: 11, fill: v.color }} width={52 + i * 6}
-                      tickLine={{ stroke: v.color }} axisLine={{ stroke: v.color }} />
+                      domain={v.domain ?? ['auto', 'auto']}
+                      unit={v.unit} tick={{ fontSize: 10, fill: v.color }} width={48}
+                      tickLine={{ stroke: v.color }} axisLine={{ stroke: 'var(--p-border)' }} />
                   ))}
-                  {rightAxes.map((v, i) => (
+                  {rightAxes.map((v) => (
                     <YAxis key={v.yAxisId} yAxisId={v.yAxisId} orientation="right"
-                      unit={v.unit} tick={{ fontSize: 11, fill: v.color }} width={52 + i * 6}
-                      tickLine={{ stroke: v.color }} axisLine={{ stroke: v.color }} />
+                      domain={v.domain ?? ['auto', 'auto']}
+                      unit={v.unit} tick={{ fontSize: 10, fill: v.color }} width={48}
+                      tickLine={{ stroke: v.color }} axisLine={{ stroke: 'var(--p-border)' }} />
                   ))}
                   <Tooltip content={<CustomTooltip />} />
                   <Legend formatter={(value) => <span style={{ fontSize: 13 }}>{value}</span>} />
                   {annotationLines(annotations)}
-                  {enabledVars.map(v => (
+                  {enabledVars.map(v => v.key === 'vpd' ? null : (
                     <Line key={v.key} yAxisId={v.yAxisId} type="monotone" dataKey={v.key}
                       name={v.label} unit={v.unit} stroke={v.color}
                       dot={false} strokeWidth={2} connectNulls />
                   ))}
+                  {activeVars.has('vpd') && <>
+                    <Line key="vpd_green"  dataKey="vpd_green"  yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#22c55e" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
+                    <Line key="vpd_yellow" dataKey="vpd_yellow" yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#facc15" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
+                    <Line key="vpd_red"    dataKey="vpd_red"    yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#ef4444" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
+                  </>}
                 </LineChart>
               </ResponsiveContainer>
               </div>
@@ -497,57 +558,24 @@ export default function TelemetryModule() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                       <XAxis {...xAxisProps} />
                       <YAxis unit={v.unit} tick={{ fontSize: 11, fill: v.color }} width={52}
-                        tickLine={{ stroke: v.color }} axisLine={{ stroke: v.color }} />
+                        domain={v.domain ?? ['auto', 'auto']}
+                        tickLine={{ stroke: v.color }} axisLine={{ stroke: '#e5e7eb' }} />
                       <Tooltip content={<CustomTooltip />} />
                       {annotationLines(annotations)}
-                      <Line type="monotone" dataKey={v.key} name={v.label} unit={v.unit}
-                        stroke={v.color} dot={false} strokeWidth={2} connectNulls />
+                      {v.key === 'vpd' ? <>
+                        <Line dataKey="vpd_green"  type="monotone" name="DPV" unit=" kPa" stroke="#22c55e" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
+                        <Line dataKey="vpd_yellow" type="monotone" name="DPV" unit=" kPa" stroke="#facc15" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
+                        <Line dataKey="vpd_red"    type="monotone" name="DPV" unit=" kPa" stroke="#ef4444" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
+                      </> : (
+                        <Line type="monotone" dataKey={v.key} name={v.label} unit={v.unit}
+                          stroke={v.color} dot={false} strokeWidth={2} connectNulls />
+                      )}
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartCard>
               ))}
             </div>
           )}
-        </div>
-
-        {/* Right: side panel */}
-        <div style={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-
-          {/* Device header card */}
-          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', fontFamily: 'monospace', marginBottom: 6 }}>
-              {deviceId}
-            </div>
-            {latest && (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block', flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>Enlace activo</span>
-                  <span style={{ fontSize: 12, color: '#9ca3af' }}>· {formatRelative(latest.timestamp)}</span>
-                </div>
-                {/* DPV semáforo destacado */}
-                {(latest as any).vpd != null && (() => {
-                  const vpd = (latest as any).vpd as number
-                  const col = vpdColor(vpd)
-                  return (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: col + '18', borderRadius: 8, padding: '6px 10px' }}>
-                      <span style={{ width: 12, height: 12, borderRadius: '50%', background: col, display: 'inline-block', flexShrink: 0 }} />
-                      <span style={{ fontSize: 13, fontWeight: 700, color: col }}>DPV: {Number(vpd).toFixed(2)} kPa</span>
-                      <span style={{ fontSize: 12, color: col, marginLeft: 'auto' }}>{vpdLabel(vpd)}</span>
-                    </div>
-                  )
-                })()}
-              </>
-            )}
-            {!latest && !isLoading && (
-              <div style={{ fontSize: 12, color: '#9ca3af' }}>Sin datos</div>
-            )}
-          </div>
-
-          {/* Metric cards */}
-          {VARIABLES.filter(v => !v.sidePanelHidden).map(v => (
-            <MetricCard key={v.key} v={v} value={(latest as any)?.[v.key]} />
-          ))}
         </div>
       </div>
     </div>

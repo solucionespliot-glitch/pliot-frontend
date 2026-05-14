@@ -40,10 +40,13 @@ export interface Controller {
 }
 
 export interface Fogger {
-  id: string
-  name: string
+  actuator_id: string
+  controller_id: string
+  device_name: string
+  actuator_label: string
   behavior_config: Record<string, unknown>
-  status: 'active' | 'idle' | 'error'
+  online: boolean
+  last_seen_at: string | null
 }
 
 export interface FoggerPreset {
@@ -86,11 +89,11 @@ export async function updateControllerOverride(
 }
 
 export async function getFoggers(): Promise<Fogger[]> {
-  const { data } = await api.get<Fogger[]>('/dashboard/foggers')
-  return data
+  const { data } = await api.get<{ foggers: Fogger[] }>('/dashboard/foggers')
+  return data.foggers
 }
 
 export async function getFoggerPresets(): Promise<FoggerPreset[]> {
-  const { data } = await api.get<FoggerPreset[]>('/dashboard/foggers/presets')
-  return data
+  const { data } = await api.get<{ presets: FoggerPreset[] }>('/dashboard/foggers/presets')
+  return data.presets
 }

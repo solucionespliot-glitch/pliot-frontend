@@ -3,58 +3,116 @@ import { useNavigate } from 'react-router-dom'
 import { useSiteContext } from '../../hooks/useSiteContext'
 import { getSiteDevices, type Device } from '../../services/devicesService'
 
-function isOnline(device: Device): boolean {
-  return device.online || (
-    !!device.last_seen_at &&
-    Date.now() - new Date(device.last_seen_at).getTime() < 5 * 60 * 1000
-  )
+function getStatus(device: Device): 'online' | 'warning' | 'offline' {
+  if (!device.last_seen_at) return 'offline'
+  const diffMs = Date.now() - new Date(device.last_seen_at).getTime()
+  const diffMin = diffMs / 60000
+  if (diffMin < 30) return 'online'
+  if (diffMin < 120) return 'warning'
+  return 'offline'
 }
 
 function formatLastSeen(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return '—'
+  if (!lastSeenAt) return 'Sin datos'
   const diffMs = Date.now() - new Date(lastSeenAt).getTime()
   const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'Just now'
-  if (diffMin < 60) return `${diffMin}m ago`
+  if (diffMin < 1) return 'Ahora'
+  if (diffMin < 60) return `Hace ${diffMin} min`
   const diffH = Math.floor(diffMin / 60)
-  if (diffH < 24) return `${diffH}h ago`
-  return `${Math.floor(diffH / 24)}d ago`
+  if (diffH < 24) return `Hace ${diffH}h`
+  return `Hace ${Math.floor(diffH / 24)}d`
 }
 
-function StatusBadge({ online }: { online: boolean }) {
+const STATUS_LABEL: Record<string, string> = {
+  online:  'Online',
+  warning: 'Regular',
+  offline: 'Offline',
+}
+const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+  online:  { bg: '#DCFCE7', text: '#16A34A' },
+  warning: { bg: '#FEF9C3', text: '#CA8A04' },
+  offline: { bg: '#FEE2E2', text: '#DC2626' },
+}
+
+function fmt1(v: number | null) { return v != null ? Number(v).toFixed(1) : '—' }
+function fmt2(v: number | null) { return v != null ? Number(v).toFixed(2) : '—' }
+
+function MetricCell({ icon, label, value, unit, color }: {
+  icon: string; label: string; value: string; unit: string; color: string
+}) {
   return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: 12,
-      fontSize: 12,
-      fontWeight: 600,
-      background: online ? '#d1fae5' : '#fee2e2',
-      color: online ? '#065f46' : '#991b1b',
-    }}>
-      {online ? 'Online' : 'Offline'}
-    </span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{ fontSize: 11, color: 'var(--p-text-muted)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <img src={icon} alt="" style={{ width: 13, height: 13, opacity: 0.7 }} />
+        {label}
+      </span>
+      <span style={{ fontSize: 20, fontWeight: 700, color, lineHeight: 1.1 }}>
+        {value}<span style={{ fontSize: 12, fontWeight: 500, color: 'var(--p-text-secondary)', marginLeft: 2 }}>{value !== '—' ? unit : ''}</span>
+      </span>
+    </div>
   )
 }
 
-function SkeletonRow() {
+function SkeletonCard() {
   return (
-    <tr>
-      {Array.from({ length: 8 }).map((_, i) => (
-        <td key={i} style={{ padding: '12px 16px' }}>
-          <div style={{
-            height: 14,
-            borderRadius: 4,
-            background: '#e5e7eb',
-            width: i === 0 ? 120 : 60,
-          }} />
-        </td>
+    <div className="device-card device-card--offline" style={{ padding: 16 }}>
+      {[80, 120, 60].map((w, i) => (
+        <div key={i} style={{ height: i === 1 ? 20 : 14, borderRadius: 4, background: '#E5E7EB', width: w, marginBottom: 10 }} />
       ))}
-    </tr>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
+        {[1,2,3,4].map(i => (
+          <div key={i} style={{ height: 36, borderRadius: 4, background: '#F3F4F6' }} />
+        ))}
+      </div>
+    </div>
   )
 }
 
-const COLUMNS = ['Device ID', 'Type', 'Zone', 'Last seen', 'Temp (°C)', 'Humidity (%)', 'Battery (V)', 'Status']
+function DeviceCard({ device, onClick }: { device: Device; onClick: () => void }) {
+  const status = getStatus(device)
+  const { bg, text } = STATUS_COLORS[status]
+
+  return (
+    <div className={`device-card device-card--${status}`} onClick={onClick}>
+      {/* Header */}
+      <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--p-border-light)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--p-text)', lineHeight: 1.2 }}>
+            {device.display_name || device.device_id}
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 'var(--p-radius-badge)', background: bg, color: text, whiteSpace: 'nowrap', flexShrink: 0 }}>
+            {STATUS_LABEL[status]}
+          </span>
+        </div>
+        <div style={{ marginTop: 4, fontSize: 12, color: 'var(--p-text-muted)' }}>
+          {device.device_id}{device.zone_name ? ` · ${device.zone_name}` : ''}
+        </div>
+      </div>
+
+      {/* Telemetry grid */}
+      <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
+        <MetricCell icon="/icono-temp.png"     label="Temperatura" value={fmt1(device.temperature)}    unit="°C"  color="var(--p-temp)" />
+        <MetricCell icon="/icono-hum.png"      label="Humedad"     value={fmt1(device.humidity)}       unit="%"   color="var(--p-hum)"  />
+        <MetricCell icon="/icono-luxLevel.png" label="Luz"         value={fmt1(device.light)}          unit=" lux" color="var(--p-light)" />
+        <MetricCell icon="/icono-dewpoint.png" label="DPV"         value={device.vpd != null ? Number(device.vpd).toFixed(2) : '—'} unit=" kPa" color="var(--p-vpd)" />
+      </div>
+
+      {/* Footer */}
+      <div style={{
+        padding: '8px 16px',
+        borderTop: '1px solid var(--p-border-light)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span style={{ fontSize: 12, color: 'var(--p-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          🔋 {fmt2(device.battery_voltage)}{device.battery_voltage != null ? ' V' : ''}
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--p-text-muted)' }}>
+          {formatLastSeen(device.last_seen_at)}
+        </span>
+      </div>
+    </div>
+  )
+}
 
 export default function DevicesModule() {
   const { siteId } = useSiteContext()
@@ -64,99 +122,41 @@ export default function DevicesModule() {
     queryKey: ['devices', siteId],
     queryFn: () => getSiteDevices(siteId!),
     enabled: !!siteId,
-    refetchInterval: 30_000, // refresh every 30s
+    refetchInterval: 30_000,
   })
 
   if (!siteId) {
     return (
-      <div style={{ padding: 32, color: '#6b7280' }}>
-        No site selected. <a href="/select-site" style={{ color: '#4f46e5' }}>Select a site</a>
+      <div style={{ padding: 32, color: 'var(--p-text-secondary)' }}>
+        Sin site seleccionado. <a href="/select-site" style={{ color: 'var(--p-primary)' }}>Seleccionar site</a>
       </div>
     )
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2 style={{ marginTop: 0, marginBottom: 20, color: '#111827', fontSize: 20, fontWeight: 600 }}>
-        Devices
-      </h2>
-
+    <div>
       {isError && (
-        <div style={{
-          padding: '12px 16px',
-          background: '#fee2e2',
-          color: '#991b1b',
-          borderRadius: 8,
-          marginBottom: 16,
-        }}>
-          Failed to load devices. Please try again.
+        <div style={{ margin: '16px 20px 0', padding: '10px 14px', background: '#FEE2E2', color: '#991B1B', borderRadius: 8, fontSize: 14 }}>
+          Error al cargar los dispositivos. Intente nuevamente.
         </div>
       )}
 
-      <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #e5e7eb' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-          <thead>
-            <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
-              {COLUMNS.map((col) => (
-                <th key={col} style={{
-                  padding: '10px 16px',
-                  textAlign: 'left',
-                  fontWeight: 600,
-                  color: '#6b7280',
-                  whiteSpace: 'nowrap',
-                }}>
-                  {col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)}
+      <div className="devices-grid">
+        {isLoading && Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
 
-            {!isLoading && devices?.map((device: Device) => (
-              <tr
-                key={device.device_id}
-                onClick={() => navigate(`/dashboard/telemetry/${device.device_id}`)}
-                style={{
-                  borderBottom: '1px solid #f3f4f6',
-                  cursor: 'pointer',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = '#f9fafb')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = '')}
-              >
-                <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#111827' }}>
-                  {device.display_name || device.device_id}
-                </td>
-                <td style={{ padding: '12px 16px', color: '#374151' }}>{device.device_type}</td>
-                <td style={{ padding: '12px 16px', color: '#374151' }}>{device.zone_name ?? '—'}</td>
-                <td style={{ padding: '12px 16px', color: '#6b7280' }}>
-                  {formatLastSeen(device.last_seen_at)}
-                </td>
-                <td style={{ padding: '12px 16px', color: '#374151' }}>
-                  {device.temperature != null ? Number(device.temperature).toFixed(1) : '—'}
-                </td>
-                <td style={{ padding: '12px 16px', color: '#374151' }}>
-                  {device.humidity != null ? Number(device.humidity).toFixed(1) : '—'}
-                </td>
-                <td style={{ padding: '12px 16px', color: '#374151' }}>
-                  {device.battery_voltage != null ? Number(device.battery_voltage).toFixed(2) : '—'}
-                </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <StatusBadge online={isOnline(device)} />
-                </td>
-              </tr>
-            ))}
+        {!isLoading && devices?.map((device: Device) => (
+          <DeviceCard
+            key={device.device_id}
+            device={device}
+            onClick={() => navigate(`/dashboard/telemetry/${device.device_id}`)}
+          />
+        ))}
 
-            {!isLoading && !isError && devices?.length === 0 && (
-              <tr>
-                <td colSpan={8} style={{ padding: '32px 16px', textAlign: 'center', color: '#9ca3af' }}>
-                  No devices found for this site.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {!isLoading && !isError && devices?.length === 0 && (
+          <div style={{ gridColumn: '1/-1', padding: '48px 16px', textAlign: 'center', color: 'var(--p-text-muted)' }}>
+            No hay dispositivos en este site.
+          </div>
+        )}
       </div>
     </div>
   )

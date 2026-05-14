@@ -55,7 +55,6 @@ createRoot(document.getElementById('root')!).render(
         scope: 'openid profile email offline_access',
       }}
       useRefreshTokens={true}
-      useRefreshTokensFallbackToWeb={true}
       cacheLocation="localstorage"
     >
       <QueryClientProvider client={queryClient}>

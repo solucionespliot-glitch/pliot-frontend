@@ -3,7 +3,7 @@ import NavBar from '../../components/NavBar'
 
 export default function DashboardLayout() {
   return (
-    <div style={{ minHeight: '100vh', background: '#f9fafb', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--p-bg)', display: 'flex', flexDirection: 'column' }}>
       <NavBar />
       <main style={{ flex: 1 }}>
         <Outlet />

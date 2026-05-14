@@ -24,17 +24,12 @@ function SyncBadge({ status }: { status: Controller['sync_status'] }) {
   )
 }
 
-const FOGGER_STATUS_COLORS: Record<Fogger['status'], { bg: string; text: string }> = {
-  active: { bg: '#d1fae5', text: '#065f46' },
-  idle:   { bg: '#f3f4f6', text: '#6b7280' },
-  error:  { bg: '#fee2e2', text: '#991b1b' },
-}
-
-function FoggerStatusBadge({ status }: { status: Fogger['status'] }) {
-  const { bg, text } = FOGGER_STATUS_COLORS[status]
+function FoggerStatusBadge({ online }: { online: boolean }) {
+  const bg   = online ? '#d1fae5' : '#f3f4f6'
+  const text = online ? '#065f46' : '#6b7280'
   return (
     <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: bg, color: text }}>
-      {status}
+      {online ? 'online' : 'offline'}
     </span>
   )
 }
@@ -185,10 +180,10 @@ export default function ControllersModule() {
                 </tr>
               ))}
               {foggers?.map((f: Fogger) => (
-                <tr key={f.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                  <td style={{ padding: '12px 16px', fontWeight: 500, color: '#111827' }}>{f.name}</td>
+                <tr key={f.actuator_id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <td style={{ padding: '12px 16px', fontWeight: 500, color: '#111827' }}>{f.actuator_label || f.device_name}</td>
                   <td style={{ padding: '12px 16px' }}>
-                    <FoggerStatusBadge status={f.status} />
+                    <FoggerStatusBadge online={f.online} />
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <code style={{ fontSize: 12, background: '#f9fafb', padding: '2px 6px', borderRadius: 4, color: '#374151', display: 'block', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

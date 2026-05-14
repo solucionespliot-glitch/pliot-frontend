@@ -13,20 +13,21 @@ const NAV_LINKS = [
 ]
 
 const activeLinkStyle: React.CSSProperties = {
-  color: '#4f46e5',
+  color: '#ffffff',
   fontWeight: 700,
-  borderBottom: '2px solid #4f46e5',
+  borderBottom: '2px solid #8DC63F',
   paddingBottom: 2,
+  opacity: 1,
 }
 
 const linkStyle: React.CSSProperties = {
-  color: '#374151',
+  color: 'rgba(255,255,255,0.75)',
   fontWeight: 500,
   textDecoration: 'none',
   fontSize: 14,
   paddingBottom: 2,
   borderBottom: '2px solid transparent',
-  transition: 'color 0.15s',
+  transition: 'color 0.15s, opacity 0.15s',
 }
 
 export default function NavBar() {
@@ -46,14 +47,16 @@ export default function NavBar() {
     mutationFn: () => impersonate(selectedOrg),
     onSuccess: (data) => {
       setImpersonateOrg(data.organization_id)
-      window.location.reload()
+      sessionStorage.removeItem('siteId')
+      window.location.href = '/select-site'
     },
   })
 
   function clearImpersonation() {
     setImpersonateOrg(null)
     setSelectedOrg('')
-    window.location.reload()
+    sessionStorage.removeItem('siteId')
+    window.location.href = '/select-site'
   }
 
   return (
@@ -61,18 +64,17 @@ export default function NavBar() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0 24px',
-      height: 56,
-      background: '#fff',
-      borderBottom: '1px solid #e5e7eb',
-      boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+      padding: '0 20px',
+      height: 52,
+      background: '#1A7A1A',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
       position: 'sticky',
       top: 0,
       zIndex: 40,
     }}>
       {/* Logo + links */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
-        <span style={{ fontWeight: 800, fontSize: 18, color: '#111827', letterSpacing: '-0.5px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+        <span style={{ fontWeight: 700, fontSize: 18, color: '#ffffff', letterSpacing: '-0.3px', fontFamily: 'Inter, sans-serif' }}>
           Pliot
         </span>
         <div style={{ display: 'flex', gap: 20 }}>
@@ -96,18 +98,18 @@ export default function NavBar() {
             <select
               value={selectedOrg}
               onChange={e => setSelectedOrg(e.target.value)}
-              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, maxWidth: 160 }}
+              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.3)', background: '#1A5C1A', color: '#fff', fontSize: 13, maxWidth: 160 }}
             >
-              <option value="">Mi org (defecto)</option>
-              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              <option value="" style={{ background: '#1A5C1A', color: '#fff' }}>Mi org (defecto)</option>
+              {orgs.map(o => <option key={o.id} value={o.id} style={{ background: '#1A5C1A', color: '#fff' }}>{o.name}</option>)}
             </select>
             <button
               disabled={!selectedOrg || impersonateMutation.isPending}
               onClick={() => impersonateMutation.mutate()}
               style={{
                 padding: '4px 10px', borderRadius: 6, border: 'none',
-                background: !selectedOrg ? '#e5e7eb' : '#4f46e5',
-                color: !selectedOrg ? '#9ca3af' : '#fff',
+                background: !selectedOrg ? 'rgba(255,255,255,0.15)' : '#8DC63F',
+                color: !selectedOrg ? 'rgba(255,255,255,0.4)' : '#fff',
                 fontSize: 12, fontWeight: 600,
                 cursor: !selectedOrg ? 'not-allowed' : 'pointer',
               }}
@@ -119,8 +121,8 @@ export default function NavBar() {
                 onClick={clearImpersonation}
                 title="Volver a mi org"
                 style={{
-                  padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb',
-                  background: '#fff', color: '#374151', fontSize: 12, cursor: 'pointer',
+                  padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.3)',
+                  background: 'transparent', color: 'rgba(255,255,255,0.75)', fontSize: 12, cursor: 'pointer',
                 }}
               >
                 Limpiar
@@ -130,7 +132,7 @@ export default function NavBar() {
         )}
 
         {/* User name */}
-        <span style={{ fontSize: 13, color: '#6b7280', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {user?.name ?? user?.email ?? '—'}
         </span>
 
@@ -138,9 +140,10 @@ export default function NavBar() {
         <button
           onClick={() => logout({ logoutParams: { returnTo: window.location.origin + '/login' } })}
           style={{
-            padding: '6px 12px', borderRadius: 6, border: '1px solid #e5e7eb',
-            background: '#fff', color: '#374151', fontSize: 13, fontWeight: 500,
-            cursor: 'pointer',
+            padding: '5px 12px', borderRadius: 6,
+            border: '1px solid rgba(255,255,255,0.3)',
+            background: 'transparent', color: 'rgba(255,255,255,0.85)',
+            fontSize: 13, fontWeight: 500, cursor: 'pointer',
           }}
         >
           Salir
