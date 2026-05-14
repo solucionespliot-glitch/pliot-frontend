@@ -13,21 +13,20 @@ const NAV_LINKS = [
 ]
 
 const activeLinkStyle: React.CSSProperties = {
-  color: '#ffffff',
-  fontWeight: 700,
-  borderBottom: '2px solid #8DC63F',
+  color: '#1A7A1A',
+  fontWeight: 600,
+  borderBottom: '2px solid #2EB82A',
   paddingBottom: 2,
-  opacity: 1,
 }
 
 const linkStyle: React.CSSProperties = {
-  color: 'rgba(255,255,255,0.75)',
+  color: '#6B7280',
   fontWeight: 500,
   textDecoration: 'none',
   fontSize: 14,
   paddingBottom: 2,
   borderBottom: '2px solid transparent',
-  transition: 'color 0.15s, opacity 0.15s',
+  transition: 'color 0.15s',
 }
 
 export default function NavBar() {
@@ -65,18 +64,22 @@ export default function NavBar() {
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '0 20px',
-      height: 52,
-      background: '#1A7A1A',
-      boxShadow: '0 1px 4px rgba(0,0,0,0.15)',
+      height: 56,
+      background: '#ffffff',
+      borderBottom: '1px solid #E2E8E2',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
       position: 'sticky',
       top: 0,
       zIndex: 40,
     }}>
       {/* Logo + links */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-        <span style={{ fontWeight: 700, fontSize: 18, color: '#ffffff', letterSpacing: '-0.3px', fontFamily: 'Inter, sans-serif' }}>
-          Pliot
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <img src="/pliot-iso.png" alt="Pliot" style={{ height: 32, width: 32, objectFit: 'contain' }} />
+          <span style={{ fontWeight: 700, fontSize: 17, color: '#1A1A1A', letterSpacing: '-0.3px', fontFamily: 'Inter, sans-serif' }}>
+            Pliot
+          </span>
+        </div>
         <div style={{ display: 'flex', gap: 20 }}>
           {NAV_LINKS.map(({ to, label }) => (
             <NavLink
@@ -98,18 +101,18 @@ export default function NavBar() {
             <select
               value={selectedOrg}
               onChange={e => setSelectedOrg(e.target.value)}
-              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.3)', background: '#1A5C1A', color: '#fff', fontSize: 13, maxWidth: 160 }}
+              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #E2E8E2', background: '#F7F9F7', color: '#1A1A1A', fontSize: 13, maxWidth: 160 }}
             >
-              <option value="" style={{ background: '#1A5C1A', color: '#fff' }}>Mi org (defecto)</option>
-              {orgs.map(o => <option key={o.id} value={o.id} style={{ background: '#1A5C1A', color: '#fff' }}>{o.name}</option>)}
+              <option value="">Mi org (defecto)</option>
+              {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
             <button
               disabled={!selectedOrg || impersonateMutation.isPending}
               onClick={() => impersonateMutation.mutate()}
               style={{
                 padding: '4px 10px', borderRadius: 6, border: 'none',
-                background: !selectedOrg ? 'rgba(255,255,255,0.15)' : '#8DC63F',
-                color: !selectedOrg ? 'rgba(255,255,255,0.4)' : '#fff',
+                background: !selectedOrg ? '#F3F4F6' : '#2EB82A',
+                color: !selectedOrg ? '#9CA3AF' : '#fff',
                 fontSize: 12, fontWeight: 600,
                 cursor: !selectedOrg ? 'not-allowed' : 'pointer',
               }}
@@ -121,8 +124,8 @@ export default function NavBar() {
                 onClick={clearImpersonation}
                 title="Volver a mi org"
                 style={{
-                  padding: '4px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.3)',
-                  background: 'transparent', color: 'rgba(255,255,255,0.75)', fontSize: 12, cursor: 'pointer',
+                  padding: '4px 8px', borderRadius: 6, border: '1px solid #E2E8E2',
+                  background: '#fff', color: '#6B7280', fontSize: 12, cursor: 'pointer',
                 }}
               >
                 Limpiar
@@ -132,7 +135,7 @@ export default function NavBar() {
         )}
 
         {/* User name */}
-        <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 13, color: '#9CA3AF', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {user?.name ?? user?.email ?? '—'}
         </span>
 
@@ -141,8 +144,8 @@ export default function NavBar() {
           onClick={() => logout({ logoutParams: { returnTo: window.location.origin + '/login' } })}
           style={{
             padding: '5px 12px', borderRadius: 6,
-            border: '1px solid rgba(255,255,255,0.3)',
-            background: 'transparent', color: 'rgba(255,255,255,0.85)',
+            border: '1px solid #E2E8E2',
+            background: '#fff', color: '#6B7280',
             fontSize: 13, fontWeight: 500, cursor: 'pointer',
           }}
         >
