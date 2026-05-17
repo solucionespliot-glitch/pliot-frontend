@@ -89,12 +89,19 @@ function DeviceCard({ device, onClick }: { device: Device; onClick: () => void }
         </div>
       </div>
 
-      {/* Telemetry grid */}
+      {/* Telemetry grid — base sensors always shown */}
       <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
-        <MetricCell icon="/icono-temp.png"     label="Temperatura" value={fmt1(device.temperature)}    unit="°C"  color="var(--p-temp)" />
-        <MetricCell icon="/icono-hum.png"      label="Humedad"     value={fmt1(device.humidity)}       unit="%"   color="var(--p-hum)"  />
+        <MetricCell icon="/icono-temp.png"     label="Temperatura" value={fmt1(device.temperature)}    unit="°C"   color="var(--p-temp)"  />
+        <MetricCell icon="/icono-hum.png"      label="Humedad"     value={fmt1(device.humidity)}       unit="%"    color="var(--p-hum)"   />
         <MetricCell icon="/icono-luxLevel.png" label="Luz"         value={fmt1(device.light)}          unit=" lux" color="var(--p-light)" />
-        <MetricCell icon="/icono-dewpoint.png" label="DPV"         value={device.vpd != null ? Number(device.vpd).toFixed(2) : '—'} unit=" kPa" color="var(--p-vpd)" />
+        <MetricCell icon="/icono-dewpoint.png" label="DPV"         value={fmt2(device.vpd)}            unit=" kPa" color="var(--p-vpd)"   />
+
+        {/* Optional sensors — only rendered if device has reported them at least once */}
+        {device.sensor_capabilities?.co2           && <MetricCell icon="/icono-co2.png"    label="CO₂"          value={fmt1(device.co2)}            unit=" ppm"        color="var(--p-co2)"  />}
+        {device.sensor_capabilities?.ppfd          && <MetricCell icon="/icono-luxLevel.png" label="PPFD"       value={fmt1(device.ppfd)}           unit=" µmol/m²·s"  color="var(--p-light)" />}
+        {device.sensor_capabilities?.ph            && <MetricCell icon="/icono-dewpoint.png" label="pH"         value={fmt2(device.ph)}             unit=""            color="var(--p-vpd)"  />}
+        {device.sensor_capabilities?.ec            && <MetricCell icon="/icono-dewpoint.png" label="EC"         value={fmt2(device.ec)}             unit=" mS/cm"      color="var(--p-vpd)"  />}
+        {device.sensor_capabilities?.soil_temperature && <MetricCell icon="/icono-temp.png" label="T° sustrato" value={fmt1(device.soil_temperature)} unit="°C"         color="var(--p-temp)" />}
       </div>
 
       {/* Footer */}

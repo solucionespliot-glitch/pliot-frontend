@@ -12,12 +12,23 @@ export interface Device {
   last_seen_at: string
   online: boolean
   last_telemetry_ts: string | null
+  // Base sensors — present in all node types
   temperature: number | null
   humidity: number | null
   vpd: number | null
   battery_voltage: number | null
   light: number | null
   co2: number | null
+  // Optional sensors — only present in specific node types.
+  // Use sensor_capabilities to check availability before displaying.
+  ppfd: number | null
+  ph: number | null
+  ec: number | null
+  soil_temperature: number | null
+  ec_temperature: number | null
+  // Declares which sensor columns this device has ever reported.
+  // Set by the backend on first telemetry receipt. Used to show/hide widgets.
+  sensor_capabilities: Record<string, boolean>
 }
 
 export interface TelemetryPoint {
