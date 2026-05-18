@@ -69,12 +69,18 @@ function vpdLabel(value: number | null | undefined): string {
 }
 
 const VARIABLES: VarConfig[] = [
-  { key: 'temperature',     label: 'Temperatura',  unit: '°C',   color: '#f97316', icon: '/icono-temp.png',     yAxisId: 'temp', orientation: 'left' },
-  { key: 'humidity',        label: 'Humedad',       unit: '%',    color: '#3b82f6', icon: '/icono-hum.png',      yAxisId: 'hum',  orientation: 'right', domain: [0, 100] },
-  { key: 'light',           label: 'Luz',           unit: ' lux', color: '#facc15', icon: '/icono-luxLevel.png', yAxisId: 'lux',  orientation: 'left' },
-  { key: 'dew_point',       label: 'Pto. Rocío',    unit: '°C',   color: '#06b6d4', icon: '/icono-dewpoint.png', yAxisId: 'dew',  orientation: 'right' },
-  { key: 'vpd',             label: 'DPV',           unit: ' kPa', color: '#8b5cf6', icon: '/icono-dewpoint.png', yAxisId: 'vpd',  orientation: 'left',  domain: [0, 15], sidePanelHidden: true },
-  { key: 'battery_voltage', label: 'Batería',       unit: ' V',   color: '#10b981', icon: '',                    iconEl: <BatteryIcon />, yAxisId: 'bat', orientation: 'right' },
+  { key: 'temperature',     label: 'Temperatura',  unit: '°C',          color: '#f97316', icon: '/icono-temp.png',     yAxisId: 'temp', orientation: 'left' },
+  { key: 'humidity',        label: 'Humedad',       unit: '%',           color: '#3b82f6', icon: '/icono-hum.png',      yAxisId: 'hum',  orientation: 'right', domain: [0, 100] },
+  { key: 'light',           label: 'Luz',           unit: ' lux',        color: '#facc15', icon: '/icono-luxLevel.png', yAxisId: 'lux',  orientation: 'left' },
+  { key: 'dew_point',       label: 'Pto. Rocío',    unit: '°C',          color: '#06b6d4', icon: '/icono-dewpoint.png', yAxisId: 'dew',  orientation: 'right' },
+  { key: 'vpd',             label: 'DPV',           unit: ' kPa',        color: '#8b5cf6', icon: '/icono-dewpoint.png', yAxisId: 'vpd',  orientation: 'left',  domain: [0, 15], sidePanelHidden: true },
+  { key: 'battery_voltage', label: 'Batería',       unit: ' V',          color: '#10b981', icon: '',                    iconEl: <BatteryIcon />, yAxisId: 'bat', orientation: 'right' },
+  // Optional sensors — only some node types report these
+  { key: 'co2',             label: 'CO₂',           unit: ' ppm',        color: '#78716c', icon: '/icono-co2.png',      yAxisId: 'co2',  orientation: 'left' },
+  { key: 'ppfd',            label: 'PPFD',          unit: ' µmol/m²·s',  color: '#fb923c', icon: '/icono-luxLevel.png', yAxisId: 'ppfd', orientation: 'right' },
+  { key: 'soil_temperature',label: 'T° sustrato',   unit: '°C',          color: '#a16207', icon: '/icono-temp.png',     yAxisId: 'soilt',orientation: 'left' },
+  { key: 'ph',              label: 'pH',            unit: '',            color: '#a78bfa', icon: '/icono-dewpoint.png', yAxisId: 'ph',   orientation: 'right' },
+  { key: 'ec',              label: 'EC',            unit: ' mS/cm',      color: '#34d399', icon: '/icono-dewpoint.png', yAxisId: 'ec',   orientation: 'left' },
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

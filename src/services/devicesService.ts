@@ -41,6 +41,10 @@ export interface TelemetryPoint {
   light: number | null
   co2: number | null
   flow_main: number | null
+  ppfd: number | null
+  ph: number | null
+  ec: number | null
+  soil_temperature: number | null
 }
 
 export interface TelemetryParams {
