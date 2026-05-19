@@ -234,7 +234,8 @@ export default function TelemetryModule() {
   const [queryFrom, setQueryFrom] = useState(() => new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString())
   const [queryTo, setQueryTo]     = useState(() => now.toISOString())
 
-  const [viewMode, setViewMode] = useState<ViewMode>('combined')
+  // Default to separated on mobile so the chart fits without horizontal overflow
+  const [viewMode, setViewMode] = useState<ViewMode>(() => window.innerWidth < 640 ? 'separated' : 'combined')
   const [activeVars, setActiveVars] = useState<Set<string>>(
     new Set(['temperature', 'humidity', 'light', 'vpd'])
   )
@@ -331,6 +332,14 @@ export default function TelemetryModule() {
     new Date(queryTo).getTime(),
   ]
 
+  // ── Mobile detection for responsive chart layout ──────────────────────────
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640)
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 640)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
+
   // ── Wheel zoom state ──────────────────────────────────────────────────────
   const [zoomDomain, setZoomDomain] = useState<[number, number] | null>(null)
   const chartWrapperRef = useRef<HTMLDivElement>(null)
@@ -383,7 +392,13 @@ export default function TelemetryModule() {
     minTickGap: 40,
   }
 
-  const enabledVars  = VARIABLES.filter(v => activeVars.has(v.key))
+  // Only show variables that this device actually reports (have at least one non-null value)
+  const availableVars = useMemo(() => {
+    if (!data || data.length === 0) return VARIABLES
+    return VARIABLES.filter(v => data.some(d => (d as any)[v.key] != null))
+  }, [data])
+
+  const enabledVars  = availableVars.filter(v => activeVars.has(v.key))
   const leftAxes     = enabledVars.filter(v => v.orientation === 'left')
   const rightAxes    = enabledVars.filter(v => v.orientation === 'right')
 
@@ -432,8 +447,8 @@ export default function TelemetryModule() {
           {/* Controls bar */}
           <div style={{ background: 'var(--p-surface)', borderRadius: 'var(--p-radius-card)', border: '1px solid var(--p-border)', padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
 
-            {/* Quick range */}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {/* Quick range — nowrap so buttons stay on a single line on mobile */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'nowrap', overflowX: 'auto' }}>
               {RANGES.map(r => (
                 <button key={r.hours} onClick={() => applyRange(r.hours)} style={{
                   padding: '5px 14px', borderRadius: 20, fontSize: 13, fontWeight: 500, cursor: 'pointer',
@@ -477,9 +492,9 @@ export default function TelemetryModule() {
             </div>
           </div>
 
-          {/* Variable toggles with latest values */}
+          {/* Variable toggles — only for sensors this device actually reports */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {VARIABLES.map(v => (
+            {availableVars.map(v => (
               <VarToggle key={v.key} v={v} active={activeVars.has(v.key)} onClick={() => toggleVar(v.key)}
                 latestValue={(latest as any)?.[v.key]} />
             ))}
@@ -519,20 +534,20 @@ export default function TelemetryModule() {
           {data && data.length > 0 && enabledVars.length > 0 && viewMode === 'combined' && (
             <ChartCard title="Telemetría">
               <div ref={chartWrapperRef} style={{ userSelect: 'none' }}>
-              <ResponsiveContainer width="100%" height={500}>
-                <LineChart data={data} margin={{ top: 8, right: 96, left: 48, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={isMobile ? 280 : 500}>
+                <LineChart data={data} margin={{ top: 8, right: isMobile ? 8 : 96, left: isMobile ? 4 : 48, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                   <XAxis {...xAxisProps} />
                   {leftAxes.map((v) => (
                     <YAxis key={v.yAxisId} yAxisId={v.yAxisId} orientation="left"
                       domain={v.domain ?? ['auto', 'auto']}
-                      unit={v.unit} tick={{ fontSize: 10, fill: v.color }} width={48}
+                      unit={v.unit} tick={{ fontSize: 10, fill: v.color }} width={isMobile ? 28 : 48}
                       tickLine={{ stroke: v.color }} axisLine={{ stroke: 'var(--p-border)' }} />
                   ))}
                   {rightAxes.map((v) => (
                     <YAxis key={v.yAxisId} yAxisId={v.yAxisId} orientation="right"
                       domain={v.domain ?? ['auto', 'auto']}
-                      unit={v.unit} tick={{ fontSize: 10, fill: v.color }} width={48}
+                      unit={v.unit} tick={{ fontSize: 10, fill: v.color }} width={isMobile ? 28 : 48}
                       tickLine={{ stroke: v.color }} axisLine={{ stroke: 'var(--p-border)' }} />
                   ))}
                   <Tooltip content={<CustomTooltip />} />
@@ -559,11 +574,11 @@ export default function TelemetryModule() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {enabledVars.map(v => (
                 <ChartCard key={v.key} title={v.label} icon={v.icon}>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <LineChart data={data} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
+                  <ResponsiveContainer width="100%" height={isMobile ? 160 : 180}>
+                    <LineChart data={data} margin={{ top: 4, right: isMobile ? 8 : 20, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                       <XAxis {...xAxisProps} />
-                      <YAxis unit={v.unit} tick={{ fontSize: 11, fill: v.color }} width={52}
+                      <YAxis unit={v.unit} tick={{ fontSize: 11, fill: v.color }} width={isMobile ? 32 : 52}
                         domain={v.domain ?? ['auto', 'auto']}
                         tickLine={{ stroke: v.color }} axisLine={{ stroke: '#e5e7eb' }} />
                       <Tooltip content={<CustomTooltip />} />
