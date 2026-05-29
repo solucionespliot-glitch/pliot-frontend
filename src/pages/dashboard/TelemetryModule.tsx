@@ -78,9 +78,17 @@ const VARIABLES: VarConfig[] = [
   // Optional sensors — only some node types report these
   { key: 'co2',             label: 'CO₂',           unit: ' ppm',        color: '#78716c', icon: '/icono-co2.png',      yAxisId: 'co2',  orientation: 'left' },
   { key: 'ppfd',            label: 'PPFD',          unit: ' µmol/m²·s',  color: '#fb923c', icon: '/icono-luxLevel.png', yAxisId: 'ppfd', orientation: 'right' },
-  { key: 'soil_temperature',label: 'T° sustrato',   unit: '°C',          color: '#a16207', icon: '/icono-temp.png',     yAxisId: 'soilt',orientation: 'left' },
-  { key: 'ph',              label: 'pH',            unit: '',            color: '#a78bfa', icon: '/icono-dewpoint.png', yAxisId: 'ph',   orientation: 'right' },
-  { key: 'ec',              label: 'EC',            unit: ' mS/cm',      color: '#34d399', icon: '/icono-dewpoint.png', yAxisId: 'ec',   orientation: 'left' },
+  { key: 'soil_temperature',  label: 'T° sustrato',   unit: '°C',      color: '#a16207', icon: '/icono-temp.png',     yAxisId: 'soilt',  orientation: 'left' },
+  { key: 'ph',               label: 'pH',            unit: '',         color: '#a78bfa', icon: '/icono-dewpoint.png', yAxisId: 'ph',     orientation: 'right' },
+  { key: 'ec',               label: 'EC',            unit: ' mS/cm',   color: '#34d399', icon: '/icono-dewpoint.png', yAxisId: 'ec',     orientation: 'left' },
+  // Capacitive soil moisture sensor (FSN-703-olmo)
+  { key: 'soil_moisture_cap', label: 'Hum. suelo',   unit: '%',        color: '#92400e', icon: '/icono-hum.png',      yAxisId: 'smcap',  orientation: 'right', domain: [0, 100] },
+  { key: 'soil_temp_cap',     label: 'T° suelo',     unit: '°C',       color: '#78350f', icon: '/icono-temp.png',     yAxisId: 'stcap',  orientation: 'left' },
+  // RIKA NPK 7-in-1 sensor (olmov-FSN-702)
+  { key: 'rika_moisture',     label: 'Hum. suelo R', unit: '%',        color: '#b45309', icon: '/icono-hum.png',      yAxisId: 'rmoist', orientation: 'right', domain: [0, 100] },
+  { key: 'rika_temperature',  label: 'T° suelo R',   unit: '°C',       color: '#92400e', icon: '/icono-temp.png',     yAxisId: 'rtemp',  orientation: 'left' },
+  { key: 'rika_ec',           label: 'EC suelo',     unit: ' mS/cm',   color: '#059669', icon: '/icono-dewpoint.png', yAxisId: 'rec',    orientation: 'right' },
+  { key: 'rika_ph',           label: 'pH suelo',     unit: '',         color: '#7c3aed', icon: '/icono-dewpoint.png', yAxisId: 'rph',    orientation: 'left' },
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

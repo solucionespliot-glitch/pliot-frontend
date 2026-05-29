@@ -26,6 +26,14 @@ export interface Device {
   ec: number | null
   soil_temperature: number | null
   ec_temperature: number | null
+  // Capacitive soil moisture sensor (FSN-703-olmo)
+  soil_moisture_cap: number | null
+  soil_temp_cap: number | null
+  // RIKA NPK 7-in-1 sensor (olmov-FSN-702)
+  rika_moisture: number | null
+  rika_temperature: number | null
+  rika_ec: number | null
+  rika_ph: number | null
   // Declares which sensor columns this device has ever reported.
   // Set by the backend on first telemetry receipt. Used to show/hide widgets.
   sensor_capabilities: Record<string, boolean>
@@ -45,6 +53,12 @@ export interface TelemetryPoint {
   ph: number | null
   ec: number | null
   soil_temperature: number | null
+  soil_moisture_cap: number | null
+  soil_temp_cap: number | null
+  rika_moisture: number | null
+  rika_temperature: number | null
+  rika_ec: number | null
+  rika_ph: number | null
 }
 
 export interface TelemetryParams {

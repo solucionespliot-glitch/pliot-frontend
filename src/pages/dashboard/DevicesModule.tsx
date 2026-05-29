@@ -101,7 +101,13 @@ function DeviceCard({ device, onClick }: { device: Device; onClick: () => void }
         {device.sensor_capabilities?.ppfd          && <MetricCell icon="/icono-luxLevel.png" label="PPFD"       value={fmt1(device.ppfd)}           unit=" µmol/m²·s"  color="var(--p-light)" />}
         {device.sensor_capabilities?.ph            && <MetricCell icon="/icono-dewpoint.png" label="pH"         value={fmt2(device.ph)}             unit=""            color="var(--p-vpd)"  />}
         {device.sensor_capabilities?.ec            && <MetricCell icon="/icono-dewpoint.png" label="EC"         value={fmt2(device.ec)}             unit=" mS/cm"      color="var(--p-vpd)"  />}
-        {device.sensor_capabilities?.soil_temperature && <MetricCell icon="/icono-temp.png" label="T° sustrato" value={fmt1(device.soil_temperature)} unit="°C"         color="var(--p-temp)" />}
+        {device.sensor_capabilities?.soil_temperature && <MetricCell icon="/icono-temp.png" label="T° sustrato"   value={fmt1(device.soil_temperature)}   unit="°C"      color="var(--p-temp)" />}
+        {device.sensor_capabilities?.soil_moisture_cap && <MetricCell icon="/icono-hum.png"  label="Hum. suelo"    value={fmt1(device.soil_moisture_cap)}  unit="%"       color="#92400e" />}
+        {device.sensor_capabilities?.soil_temp_cap     && <MetricCell icon="/icono-temp.png" label="T° suelo"      value={fmt1(device.soil_temp_cap)}      unit="°C"      color="#a16207" />}
+        {device.sensor_capabilities?.rika_moisture     && <MetricCell icon="/icono-hum.png"  label="Hum. suelo R"  value={fmt1(device.rika_moisture)}      unit="%"       color="#92400e" />}
+        {device.sensor_capabilities?.rika_temperature  && <MetricCell icon="/icono-temp.png" label="T° suelo R"    value={fmt1(device.rika_temperature)}   unit="°C"      color="#a16207" />}
+        {device.sensor_capabilities?.rika_ec           && <MetricCell icon="/icono-dewpoint.png" label="EC suelo"  value={fmt2(device.rika_ec)}            unit=" mS/cm"  color="var(--p-vpd)" />}
+        {device.sensor_capabilities?.rika_ph           && <MetricCell icon="/icono-dewpoint.png" label="pH suelo"  value={fmt2(device.rika_ph)}            unit=""        color="var(--p-vpd)" />}
       </div>
 
       {/* Footer */}

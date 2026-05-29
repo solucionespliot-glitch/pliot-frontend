@@ -1,4 +1,4 @@
-import { StrictMode, useEffect } from 'react'
+import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react'
 import { RouterProvider } from 'react-router-dom'
@@ -14,11 +14,17 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1 } },
 })
 
-// Wires Auth0 token into axios on every request
+// Wires Auth0 token into axios on every request.
+// We hold rendering children until the interceptor is registered to avoid a race
+// condition where page-level useEffects fire API calls before the auth header is set.
 function AuthSetup({ children }: { children: React.ReactNode }) {
-  const { getAccessTokenSilently, isAuthenticated, loginWithRedirect } = useAuth0()
+  const { getAccessTokenSilently, isAuthenticated, isLoading, loginWithRedirect } = useAuth0()
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    // Wait until Auth0 finishes its silent-auth check before proceeding
+    if (isLoading) return
+
     if (isAuthenticated) {
       setupAuthInterceptor(async () => {
         try {
@@ -39,7 +45,13 @@ function AuthSetup({ children }: { children: React.ReactNode }) {
         }
       })
     }
-  }, [isAuthenticated, getAccessTokenSilently, loginWithRedirect])
+
+    // Interceptor is set up (or not needed for unauthenticated users).
+    // Safe to render children now — PrivateRoute will redirect to /login if needed.
+    setReady(true)
+  }, [isAuthenticated, isLoading, getAccessTokenSilently, loginWithRedirect])
+
+  if (!ready) return null
 
   return <>{children}</>
 }
