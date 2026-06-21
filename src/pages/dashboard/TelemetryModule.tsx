@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { keepPreviousData } from '@tanstack/react-query'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   LineChart,
@@ -38,7 +39,9 @@ interface VarConfig {
   iconEl?: React.ReactNode
   yAxisId: string
   orientation: 'left' | 'right'
-  domain?: [number | string, number | string]
+  // Domain accepts fixed numbers or functions so recharts can expand the range
+  // when data exceeds the default scale (e.g. frost temps below 0°C).
+  domain?: [number | string | ((v: number) => number), number | string | ((v: number) => number)]
   sidePanelHidden?: boolean
 }
 
@@ -68,27 +71,30 @@ function vpdLabel(value: number | null | undefined): string {
   return 'Muy alto'
 }
 
+// Default scale boundaries per sensor type.
+// Each entry uses recharts domain functions: if data stays within range, the fixed
+// scale is used; if data exceeds it (e.g. frost temps < 0), the axis expands.
 const VARIABLES: VarConfig[] = [
-  { key: 'temperature',     label: 'Temperatura',  unit: '°C',          color: '#f97316', icon: '/icono-temp.png',     yAxisId: 'temp', orientation: 'left' },
-  { key: 'humidity',        label: 'Humedad',       unit: '%',           color: '#3b82f6', icon: '/icono-hum.png',      yAxisId: 'hum',  orientation: 'right', domain: [0, 100] },
-  { key: 'light',           label: 'Luz',           unit: ' lux',        color: '#facc15', icon: '/icono-luxLevel.png', yAxisId: 'lux',  orientation: 'left' },
-  { key: 'dew_point',       label: 'Pto. Rocío',    unit: '°C',          color: '#06b6d4', icon: '/icono-dewpoint.png', yAxisId: 'dew',  orientation: 'right' },
-  { key: 'vpd',             label: 'DPV',           unit: ' kPa',        color: '#8b5cf6', icon: '/icono-dewpoint.png', yAxisId: 'vpd',  orientation: 'left',  domain: [0, 15], sidePanelHidden: true },
-  { key: 'battery_voltage', label: 'Batería',       unit: ' V',          color: '#10b981', icon: '',                    iconEl: <BatteryIcon />, yAxisId: 'bat', orientation: 'right' },
+  { key: 'temperature',     label: 'Temperatura',  unit: '°C',          color: '#f97316', icon: '/icono-temp.png',     yAxisId: 'temp', orientation: 'left',  domain: [(d: number) => Math.min(0, d),    (d: number) => Math.max(35, d)]    },
+  { key: 'humidity',        label: 'Humedad',       unit: '%',           color: '#3b82f6', icon: '/icono-hum.png',      yAxisId: 'hum',  orientation: 'right', domain: [0, 100]                                                             },
+  { key: 'light',           label: 'Luz',           unit: ' lux',        color: '#facc15', icon: '/icono-luxLevel.png', yAxisId: 'lux',  orientation: 'left',  domain: [0, (d: number) => Math.max(15000, d)]                              },
+  { key: 'dew_point',       label: 'Pto. Rocío',    unit: '°C',          color: '#06b6d4', icon: '/icono-dewpoint.png', yAxisId: 'dew',  orientation: 'right', domain: [(d: number) => Math.min(0, d),    (d: number) => Math.max(35, d)]    },
+  { key: 'vpd',             label: 'DPV',           unit: ' kPa',        color: '#8b5cf6', icon: '/icono-dewpoint.png', yAxisId: 'vpd',  orientation: 'left',  domain: [0, (d: number) => Math.max(3, d)], sidePanelHidden: true             },
+  { key: 'battery_voltage', label: 'Batería',       unit: ' V',          color: '#10b981', icon: '',                    iconEl: <BatteryIcon />, yAxisId: 'bat', orientation: 'right', domain: [0, (d: number) => Math.max(3.6, d)]   },
   // Optional sensors — only some node types report these
-  { key: 'co2',             label: 'CO₂',           unit: ' ppm',        color: '#78716c', icon: '/icono-co2.png',      yAxisId: 'co2',  orientation: 'left' },
-  { key: 'ppfd',            label: 'PPFD',          unit: ' µmol/m²·s',  color: '#fb923c', icon: '/icono-luxLevel.png', yAxisId: 'ppfd', orientation: 'right' },
-  { key: 'soil_temperature',  label: 'T° sustrato',   unit: '°C',      color: '#a16207', icon: '/icono-temp.png',     yAxisId: 'soilt',  orientation: 'left' },
-  { key: 'ph',               label: 'pH',            unit: '',         color: '#a78bfa', icon: '/icono-dewpoint.png', yAxisId: 'ph',     orientation: 'right' },
-  { key: 'ec',               label: 'EC',            unit: ' mS/cm',   color: '#34d399', icon: '/icono-dewpoint.png', yAxisId: 'ec',     orientation: 'left' },
+  { key: 'co2',             label: 'CO₂',           unit: ' ppm',        color: '#78716c', icon: '/icono-co2.png',      yAxisId: 'co2',  orientation: 'left'                                                                               },
+  { key: 'ppfd',            label: 'PPFD',          unit: ' µmol/m²·s',  color: '#fb923c', icon: '/icono-luxLevel.png', yAxisId: 'ppfd', orientation: 'right', domain: [0, (d: number) => Math.max(15000, d)]                             },
+  { key: 'soil_temperature',  label: 'T° sustrato', unit: '°C',          color: '#a16207', icon: '/icono-temp.png',     yAxisId: 'soilt',  orientation: 'left', domain: [(d: number) => Math.min(0, d),  (d: number) => Math.max(35, d)]  },
+  { key: 'ph',               label: 'pH',           unit: '',            color: '#a78bfa', icon: '/icono-dewpoint.png', yAxisId: 'ph',     orientation: 'right', domain: [0, (d: number) => Math.max(14, d)]                              },
+  { key: 'ec',               label: 'EC',           unit: ' mS/cm',      color: '#34d399', icon: '/icono-dewpoint.png', yAxisId: 'ec',     orientation: 'left',  domain: [0, (d: number) => Math.max(6, d)]                               },
   // Capacitive soil moisture sensor (FSN-703-olmo)
-  { key: 'soil_moisture_cap', label: 'Hum. suelo',   unit: '%',        color: '#92400e', icon: '/icono-hum.png',      yAxisId: 'smcap',  orientation: 'right', domain: [0, 100] },
-  { key: 'soil_temp_cap',     label: 'T° suelo',     unit: '°C',       color: '#78350f', icon: '/icono-temp.png',     yAxisId: 'stcap',  orientation: 'left' },
+  { key: 'soil_moisture_cap', label: 'Hum. suelo',  unit: '%',           color: '#92400e', icon: '/icono-hum.png',      yAxisId: 'smcap',  orientation: 'right', domain: [0, 100]                                                         },
+  { key: 'soil_temp_cap',     label: 'T° suelo',    unit: '°C',          color: '#78350f', icon: '/icono-temp.png',     yAxisId: 'stcap',  orientation: 'left',  domain: [(d: number) => Math.min(0, d), (d: number) => Math.max(35, d)]  },
   // RIKA NPK 7-in-1 sensor (olmov-FSN-702)
-  { key: 'rika_moisture',     label: 'Hum. suelo R', unit: '%',        color: '#b45309', icon: '/icono-hum.png',      yAxisId: 'rmoist', orientation: 'right', domain: [0, 100] },
-  { key: 'rika_temperature',  label: 'T° suelo R',   unit: '°C',       color: '#92400e', icon: '/icono-temp.png',     yAxisId: 'rtemp',  orientation: 'left' },
-  { key: 'rika_ec',           label: 'EC suelo',     unit: ' mS/cm',   color: '#059669', icon: '/icono-dewpoint.png', yAxisId: 'rec',    orientation: 'right' },
-  { key: 'rika_ph',           label: 'pH suelo',     unit: '',         color: '#7c3aed', icon: '/icono-dewpoint.png', yAxisId: 'rph',    orientation: 'left' },
+  { key: 'rika_moisture',     label: 'Hum. suelo R',unit: '%',           color: '#b45309', icon: '/icono-hum.png',      yAxisId: 'rmoist', orientation: 'right', domain: [0, 100]                                                         },
+  { key: 'rika_temperature',  label: 'T° suelo R',  unit: '°C',          color: '#92400e', icon: '/icono-temp.png',     yAxisId: 'rtemp',  orientation: 'left',  domain: [(d: number) => Math.min(0, d), (d: number) => Math.max(35, d)]  },
+  { key: 'rika_ec',           label: 'EC suelo',    unit: ' mS/cm',      color: '#059669', icon: '/icono-dewpoint.png', yAxisId: 'rec',    orientation: 'right', domain: [0, (d: number) => Math.max(6, d)]                               },
+  { key: 'rika_ph',           label: 'pH suelo',    unit: '',            color: '#7c3aed', icon: '/icono-dewpoint.png', yAxisId: 'rph',    orientation: 'left',  domain: [0, (d: number) => Math.max(14, d)]                              },
 ]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -151,34 +157,48 @@ function annotationLines(annotations: Annotation[]) {
   ))
 }
 
-// ── Custom Tooltip ────────────────────────────────────────────────────────────
+// ── Active dot with value label rendered directly on the curve ────────────────
 
-function CustomTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null
+// Keys that need 2 decimal places
+const TWO_DECIMAL_KEYS = new Set(['vpd', 'ph', 'ec', 'battery_voltage', 'rika_ec', 'rika_ph', 'dew_point'])
 
-  // Deduplicate VPD segments — show only the first non-null entry named "DPV"
-  const seen = new Set<string>()
-  const filtered = payload.filter((p: any) => {
-    if (seen.has(p.name)) return false
-    seen.add(p.name)
-    return true
-  })
+function fmtVal(key: string, val: number | null | undefined): string {
+  if (val == null) return '—'
+  return TWO_DECIMAL_KEYS.has(key) ? Number(val).toFixed(2) : Number(val).toFixed(1)
+}
 
+// Generic dot for any regular variable
+function makeActiveDot(vKey: string, unit: string, color: string) {
+  return (props: any) => {
+    const { cx, cy, value } = props
+    if (value == null || cx == null || cy == null) return <g />
+    const label = fmtVal(vKey, value as number) + (unit.trim() ? ` ${unit.trim()}` : '')
+    const w = label.length * 6.2 + 10
+    return (
+      <g>
+        <circle cx={cx} cy={cy} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
+        <rect x={cx + 9} y={cy - 11} width={w} height={17} rx={3} fill="rgba(17,24,39,0.92)" />
+        <text x={cx + 14} y={cy + 3} fontSize={11} fontWeight={700} fill={color}>{label}</text>
+      </g>
+    )
+  }
+}
+
+// VPD dot reads the raw `vpd` field from payload so the label is always correct
+// regardless of which color segment (vpd_green/yellow/red) is active
+function makeVpdActiveDot(props: any) {
+  const { cx, cy, value, payload } = props
+  if (value == null || cx == null || cy == null) return <g />
+  const vpd = payload?.vpd as number
+  const color = vpdColor(vpd)
+  const label = `${Number(vpd).toFixed(2)} kPa`
+  const w = label.length * 6.2 + 10
   return (
-    <div style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8, padding: '10px 14px', minWidth: 180 }}>
-      <p style={{ margin: '0 0 8px', fontSize: 12, color: '#9ca3af' }}>
-        {new Date(label).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-      </p>
-      {filtered.map((p: any) => (
-        <div key={p.dataKey} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: p.color, display: 'inline-block', flexShrink: 0 }} />
-          <span style={{ color: '#e5e7eb', fontSize: 13 }}>{p.name}:</span>
-          <span style={{ color: '#fff', fontWeight: 600, fontSize: 13 }}>
-            {p.value != null ? Number(p.value).toFixed(1) : '—'}{p.unit}
-          </span>
-        </div>
-      ))}
-    </div>
+    <g>
+      <circle cx={cx} cy={cy} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
+      <rect x={cx + 9} y={cy - 11} width={w} height={17} rx={3} fill="rgba(17,24,39,0.92)" />
+      <text x={cx + 14} y={cy + 3} fontSize={11} fontWeight={700} fill={color}>{label}</text>
+    </g>
   )
 }
 
@@ -230,6 +250,9 @@ function ChartCard({ title, icon, children }: { title: string; icon?: string; ch
 export default function TelemetryModule() {
   const { deviceId } = useParams<{ deviceId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  // display_name passed via router state when navigating from DevicesModule
+  const displayName: string | undefined = (location.state as { display_name?: string } | null)?.display_name
 
   const now = new Date()
 
@@ -281,6 +304,8 @@ export default function TelemetryModule() {
     queryFn: () => getDeviceTelemetry(deviceId!, queryParams),
     enabled: !!deviceId,
     refetchOnWindowFocus: false,
+    // Keep showing previous data while new range loads so the chart never goes blank
+    placeholderData: keepPreviousData,
   })
 
   const { data: annotations = [] } = useQuery({
@@ -327,7 +352,7 @@ export default function TelemetryModule() {
     })
   }, [rawData])
 
-  // Latest reading (last data point)
+  // Latest reading (last data point — always from full dataset regardless of zoom)
   const latest = data && data.length > 0 ? data[data.length - 1] : null
 
   const rangeHours = selectedHours > 0
@@ -352,42 +377,221 @@ export default function TelemetryModule() {
   const [zoomDomain, setZoomDomain] = useState<[number, number] | null>(null)
   const chartWrapperRef = useRef<HTMLDivElement>(null)
 
-  // Reset zoom whenever the query range changes
-  useEffect(() => { setZoomDomain(null) }, [queryFrom, queryTo])
+  // Flag set by auto-extend operations so the zoom-reset effect below can skip them.
+  // Manual range changes (preset buttons, date picker) should reset zoom; auto-extends don't.
+  const isAutoExtendRef = useRef(false)
+
+  // Reset zoom when the query range changes — but skip auto-extend reloads so the
+  // current zoom level is preserved when panning or zooming beyond the loaded range.
+  useEffect(() => {
+    if (isAutoExtendRef.current) { isAutoExtendRef.current = false; return }
+    setZoomDomain(null)
+  }, [queryFrom, queryTo])
+
+  // Tracks when the cursor last entered the chart area.
+  // Used to distinguish intentional zoom-out from accidentally scrolling past the chart.
+  const chartEnterTimeRef = useRef(0)
 
   const effectiveDomain: [number, number] = zoomDomain ?? xDomain
 
-  // Refs para que el handler siempre lea los valores actuales sin stale closure
-  const zoomDomainRef = useRef<[number, number] | null>(null)
-  const xDomainRef    = useRef<[number, number]>(xDomain)
-  zoomDomainRef.current = zoomDomain
-  xDomainRef.current    = xDomain
+  // Filter data to the visible domain so Recharts always receives a new array
+  // reference when zoom changes. Without this, Recharts memoizes on the `data`
+  // prop reference and doesn't redraw even when XAxis domain changes.
+  // Filtering also improves render performance by dropping off-screen points.
+  const visibleData = useMemo(() => {
+    if (!data) return undefined
+    const [domStart, domEnd] = effectiveDomain
+    return data.filter(d => d.ts >= domStart && d.ts <= domEnd)
+  }, [data, effectiveDomain])
+
+  // isDragging: true while pan drag is in progress (used only for cursor style)
+  const [isDragging, setIsDragging] = useState(false)
+
+  // Refs so event handlers always read the latest values without stale closures
+  const xDomainRef         = useRef<[number, number]>(xDomain)
+  const effectiveDomainRef = useRef<[number, number]>(effectiveDomain)
+  const isMobileRef        = useRef(isMobile)
+  const selectedHoursRef      = useRef(selectedHours)
+  const applyRangeRef         = useRef(applyRange)
+  const zoomDomainRef         = useRef(zoomDomain)
+  // Loads an arbitrary [fromTs, toTs] range without resetting zoom (used by pan auto-extend)
+  const loadCustomRangeRef    = useRef<(fromTs: number, toTs: number) => void>(() => {})
+  xDomainRef.current            = xDomain
+  effectiveDomainRef.current    = effectiveDomain
+  isMobileRef.current           = isMobile
+  selectedHoursRef.current      = selectedHours
+  applyRangeRef.current         = applyRange
+  zoomDomainRef.current         = zoomDomain
+  loadCustomRangeRef.current    = (fromTs: number, toTs: number) => {
+    isAutoExtendRef.current = true   // tell the effect not to reset zoom
+    setQueryFrom(new Date(fromTs).toISOString())
+    setQueryTo(new Date(toTs).toISOString())
+    setFrom(toLocalDatetimeValue(new Date(fromTs)))
+    setTo(toLocalDatetimeValue(new Date(toTs)))
+    setSelectedHours(0)
+  }
+
+  // True while the cursor is physically inside the chart wrapper element.
+  // Updated by native mouseenter/mouseleave — fires immediately, no React/Recharts delay.
+  // Used as the gate to decide whether wheel events should zoom or scroll the page.
+  const isOverChartRef = useRef(false)
+  // Exact timestamp under the cursor, updated by Recharts onMouseMove on each <LineChart>.
+  // Used only to anchor the zoom to the cursor position. Falls back to center when null.
+  const mouseTimestampRef = useRef<number | null>(null)
+  // Pan drag start state
+  const panStartRef = useRef<{ clientX: number; domain: [number, number] } | null>(null)
+  // Pending rAF ids — throttle both zoom and pan to at most one render per frame
+  const panRafRef  = useRef<number | null>(null)
+  const zoomRafRef = useRef<number | null>(null)
+
+  // Returns the left/right chart margins that Recharts uses internally
+  function getChartMargins() {
+    return isMobileRef.current
+      ? { left: 4,  right: 8  }
+      : { left: 48, right: 96 }
+  }
+
+  // Progression of hours for auto-extend when zooming out past the query ceiling.
+  // Goes beyond the preset buttons (720 = 30d, 1440 = 60d) so the user can keep scrolling.
+  const AUTO_EXTEND_STEPS = [1, 24, 72, 168, 360, 720, 1440]
 
   const handleWheelRef = useRef<(e: WheelEvent) => void>(() => {})
   handleWheelRef.current = (e: WheelEvent) => {
+    // Gate on native mouseenter/mouseleave — no React/Recharts delay.
+    // When cursor is outside the chart wrapper, let the page scroll normally.
+    if (!isOverChartRef.current) return
+    if (isMobileRef.current) return        // zoom/pan disabled on mobile
     e.preventDefault()
-    const [start, end] = zoomDomainRef.current ?? xDomainRef.current
-    const span   = end - start
-    const center = (start + end) / 2
-    const factor = e.deltaY > 0 ? 2.5 : 0.4   // scroll down = zoom out, up = zoom in
-    const newSpan = Math.min(
-      Math.max(span * factor, 30 * 60 * 1000), // min 30 min
-      xDomainRef.current[1] - xDomainRef.current[0],
-    )
-    let s = center - newSpan / 2
-    let t = center + newSpan / 2
-    if (s < xDomainRef.current[0]) { s = xDomainRef.current[0]; t = s + newSpan }
-    if (t > xDomainRef.current[1]) { t = xDomainRef.current[1]; s = t - newSpan }
-    setZoomDomain([s, t])
+
+    const deltaY = e.deltaY
+
+    // When scrolling out and at the query ceiling, auto-load a wider range.
+    // Require the cursor to have been hovering for >300 ms to avoid accidental
+    // triggers while the user scrolls the page past the chart.
+    if (deltaY > 0) {
+      const [curStart, curEnd] = effectiveDomainRef.current
+      const querySpan = xDomainRef.current[1] - xDomainRef.current[0]
+      if (curEnd - curStart >= querySpan * 0.95) {
+        if (Date.now() - chartEnterTimeRef.current < 300) return
+        const idx = AUTO_EXTEND_STEPS.indexOf(selectedHoursRef.current)
+        if (idx >= 0 && idx < AUTO_EXTEND_STEPS.length - 1) {
+          isAutoExtendRef.current = true
+          applyRangeRef.current(AUTO_EXTEND_STEPS[idx + 1])
+        }
+        return
+      }
+    }
+
+    // Capture values NOW (in the event) so the rAF closure has the latest state.
+    // mouseTimestampRef is a ref so it's always current even inside the rAF callback.
+    const cursorTs = mouseTimestampRef.current
+    const factor   = deltaY > 0 ? 1.25 : 0.8
+
+    // Throttle renders to one per animation frame — multiple wheel events within
+    // the same frame collapse into a single React re-render.
+    if (zoomRafRef.current !== null) cancelAnimationFrame(zoomRafRef.current)
+    zoomRafRef.current = requestAnimationFrame(() => {
+      zoomRafRef.current = null
+      setZoomDomain(prev => {
+        const [start, end] = prev ?? xDomainRef.current
+        const span    = end - start
+        const newSpan = Math.min(
+          Math.max(span * factor, 30 * 60 * 1000),  // floor: 30 min
+          xDomainRef.current[1] - xDomainRef.current[0],
+        )
+        const anchor = cursorTs != null ? Math.max(start, Math.min(end, cursorTs)) : start + 0.5 * span
+        const ratio  = (anchor - start) / span
+        let s = anchor - ratio * newSpan
+        let t = anchor + (1 - ratio) * newSpan
+        const [qStart, qEnd] = xDomainRef.current
+        if (s < qStart) { s = qStart; t = s + newSpan }
+        if (t > qEnd)   { t = qEnd;   s = t - newSpan }
+        if (s <= qStart && t >= qEnd) return null
+        return [s, t]
+      })
+    })
   }
 
-  // Registro estable: el listener apunta siempre al ref, nunca se re-registra
+  // Stable wheel + mouse listeners (all handlers delegate to refs)
   useEffect(() => {
     const el = chartWrapperRef.current
     if (!el) return
-    const handler = (e: WheelEvent) => handleWheelRef.current(e)
-    el.addEventListener('wheel', handler, { passive: false })
-    return () => el.removeEventListener('wheel', handler)
+
+    const onWheel = (e: WheelEvent) => handleWheelRef.current(e)
+
+    const onMouseMove = (e: MouseEvent) => {
+      // Handle pan drag only — zoom anchor timestamp is tracked via Recharts onMouseMove.
+      // Throttle with rAF so React re-renders at most once per animation frame (~60fps).
+      if (panStartRef.current) {
+        const { left: lm, right: rm } = getChartMargins()
+        const rect = el.getBoundingClientRect()
+        const plotWidth = rect.width - lm - rm
+        const dx = e.clientX - panStartRef.current.clientX
+        const [domStart, domEnd] = panStartRef.current.domain
+        const span = domEnd - domStart
+        const timePerPx = span / plotWidth
+        const delta = -dx * timePerPx
+        // Allow pan to go freely outside the loaded range — the chart shows existing
+        // data where available and empty space beyond. On mouseup we load the missing data.
+        const s = domStart + delta
+        const t = domEnd + delta
+        const newDomain: [number, number] = [s, t]
+        if (panRafRef.current !== null) cancelAnimationFrame(panRafRef.current)
+        panRafRef.current = requestAnimationFrame(() => {
+          setZoomDomain(newDomain)
+          panRafRef.current = null
+        })
+      }
+    }
+
+    const onMouseDown = (e: MouseEvent) => {
+      // Start pan when cursor is over the chart area, left button, and not on mobile.
+      // Use isOverChartRef (native mouseenter) not mouseTimestampRef so dragging works
+      // even when starting from Y-axis labels or chart card padding.
+      if (!isOverChartRef.current || e.button !== 0) return
+      if (isMobileRef.current) return
+      e.preventDefault() // prevent text selection during drag
+      panStartRef.current = { clientX: e.clientX, domain: effectiveDomainRef.current }
+      setIsDragging(true)
+    }
+
+    const onMouseUp = () => {
+      if (panStartRef.current) {
+        if (panRafRef.current !== null) {
+          cancelAnimationFrame(panRafRef.current)
+          panRafRef.current = null
+        }
+        panStartRef.current = null
+        setIsDragging(false)
+
+        // If the pan ended outside the loaded range, extend the query to cover it.
+        // isAutoExtendRef prevents the effect from resetting the current zoom level.
+        const domain = zoomDomainRef.current
+        if (domain) {
+          const [s, t] = domain
+          const [qStart, qEnd] = xDomainRef.current
+          if (s < qStart || t > qEnd) {
+            const buffer = (qEnd - qStart) * 0.1  // 10% padding on each side
+            loadCustomRangeRef.current(
+              Math.min(s, qStart) - buffer,
+              Math.max(t, qEnd)   + buffer,
+            )
+          }
+        }
+      }
+    }
+
+    el.addEventListener('wheel',     onWheel,     { passive: false })
+    el.addEventListener('mousedown', onMouseDown)
+    // mousemove and mouseup on document so drag works even when cursor leaves the chart
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup',   onMouseUp)
+    return () => {
+      el.removeEventListener('wheel',     onWheel)
+      el.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup',   onMouseUp)
+    }
   }, [])
 
   const xAxisProps = {
@@ -400,15 +604,40 @@ export default function TelemetryModule() {
     minTickGap: 40,
   }
 
-  // Only show variables that this device actually reports (have at least one non-null value)
-  const availableVars = useMemo(() => {
-    if (!data || data.length === 0) return VARIABLES
-    return VARIABLES.filter(v => data.some(d => (d as any)[v.key] != null))
+  // Track which variable keys this device has ever reported in any loaded range.
+  // We accumulate rather than recompute so that auto-extend range changes don't cause
+  // variables to flash in/out — once a variable appears it stays available until
+  // the user navigates to a different device.
+  const seenVarKeysRef = useRef(new Set<string>())
+  const [availableVars, setAvailableVars] = useState<VarConfig[]>(VARIABLES)
+
+  // Reset when device changes
+  useEffect(() => {
+    seenVarKeysRef.current = new Set()
+    setAvailableVars(VARIABLES)
+  }, [deviceId])
+
+  // Accumulate variables from each data load — never remove, only add new ones
+  useEffect(() => {
+    if (!data || data.length === 0) return
+    let changed = false
+    for (const d of data) {
+      for (const v of VARIABLES) {
+        if ((d as any)[v.key] != null && !seenVarKeysRef.current.has(v.key)) {
+          seenVarKeysRef.current.add(v.key)
+          changed = true
+        }
+      }
+    }
+    if (changed) {
+      setAvailableVars(VARIABLES.filter(v => seenVarKeysRef.current.has(v.key)))
+    }
   }, [data])
 
   const enabledVars  = availableVars.filter(v => activeVars.has(v.key))
   const leftAxes     = enabledVars.filter(v => v.orientation === 'left')
   const rightAxes    = enabledVars.filter(v => v.orientation === 'right')
+
 
   return (
     <div style={{ padding: '20px 20px 32px' }}>
@@ -421,6 +650,11 @@ export default function TelemetryModule() {
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--p-text)' }}>
           {deviceId}
         </h2>
+        {displayName && displayName !== deviceId && (
+          <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--p-text-secondary)', background: 'var(--p-surface)', border: '1px solid var(--p-border)', borderRadius: 8, padding: '3px 10px' }}>
+            {displayName}
+          </span>
+        )}
         {latest && (
           <>
             <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -449,11 +683,17 @@ export default function TelemetryModule() {
       {/* Main layout: full width */}
       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
 
-        {/* Chart area — full width */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Chart area — scroll zoom and pan are active whenever the cursor is over the plot area. */}
+        <div
+          ref={chartWrapperRef}
+          style={{
+            flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16,
+            cursor: isDragging ? 'grabbing' : 'default',
+          }}
+        >
 
-          {/* Controls bar */}
-          <div style={{ background: 'var(--p-surface)', borderRadius: 'var(--p-radius-card)', border: '1px solid var(--p-border)', padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+          {/* Controls bar — stopPropagation so clicking here doesn't activate chart zoom focus */}
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--p-surface)', borderRadius: 'var(--p-radius-card)', border: '1px solid var(--p-border)', padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
 
             {/* Quick range — nowrap so buttons stay on a single line on mobile */}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'nowrap', overflowX: 'auto' }}>
@@ -500,21 +740,28 @@ export default function TelemetryModule() {
             </div>
           </div>
 
-          {/* Variable toggles — only for sensors this device actually reports */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {/* Variable toggles — stopPropagation so clicking toggles doesn't activate zoom focus */}
+          <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {availableVars.map(v => (
               <VarToggle key={v.key} v={v} active={activeVars.has(v.key)} onClick={() => toggleVar(v.key)}
                 latestValue={(latest as any)?.[v.key]} />
             ))}
           </div>
 
-          {/* Data info */}
+          {/* Data info + zoom hint */}
           {data && (
-            <div style={{ fontSize: 12, color: 'var(--p-text-muted)', paddingLeft: 2 }}>
-              {data.length} puntos ·{' '}
-              {new Date(queryFrom).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-              {' → '}
-              {new Date(queryTo).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingLeft: 2, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: 'var(--p-text-muted)' }}>
+                {visibleData?.length ?? data.length} puntos ·{' '}
+                {new Date(queryFrom).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                {' → '}
+                {new Date(queryTo).toLocaleString('es-AR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              </span>
+              {!isMobile && (
+                <span style={{ fontSize: 12, color: 'var(--p-text-muted)' }}>
+                  Scroll sobre el gráfico para acercar/alejar · arrastrar para mover
+                </span>
+              )}
             </div>
           )}
 
@@ -538,12 +785,21 @@ export default function TelemetryModule() {
             <div style={{ color: 'var(--p-text-muted)', padding: 32, textAlign: 'center' }}>Seleccioná al menos una variable.</div>
           )}
 
+          {/* Chart area — mouseenter/leave here gates scroll-zoom, excluding controls and toggles above */}
+          <div
+            onMouseEnter={() => { isOverChartRef.current = true; chartEnterTimeRef.current = Date.now() }}
+            onMouseLeave={() => { isOverChartRef.current = false }}
+          >
+
           {/* Combined chart */}
           {data && data.length > 0 && enabledVars.length > 0 && viewMode === 'combined' && (
             <ChartCard title="Telemetría">
-              <div ref={chartWrapperRef} style={{ userSelect: 'none' }}>
+              <div style={{ userSelect: 'none' }}>
               <ResponsiveContainer width="100%" height={isMobile ? 280 : 500}>
-                <LineChart data={data} margin={{ top: 8, right: isMobile ? 8 : 96, left: isMobile ? 4 : 48, bottom: 0 }}>
+                <LineChart data={visibleData} margin={{ top: 8, right: isMobile ? 8 : 96, left: isMobile ? 4 : 48, bottom: 0 }}
+                  onMouseMove={(e: any) => { if (e.activeLabel != null) mouseTimestampRef.current = Number(e.activeLabel) }}
+                  onMouseLeave={() => { mouseTimestampRef.current = null }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                   <XAxis {...xAxisProps} />
                   {leftAxes.map((v) => (
@@ -558,18 +814,19 @@ export default function TelemetryModule() {
                       unit={v.unit} tick={{ fontSize: 10, fill: v.color }} width={isMobile ? 28 : 48}
                       tickLine={{ stroke: v.color }} axisLine={{ stroke: 'var(--p-border)' }} />
                   ))}
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip cursor={{ stroke: '#6b7280', strokeWidth: 1, strokeDasharray: '4 2' }} content={() => null} />
                   <Legend formatter={(value) => <span style={{ fontSize: 13 }}>{value}</span>} />
                   {annotationLines(annotations)}
                   {enabledVars.map(v => v.key === 'vpd' ? null : (
                     <Line key={v.key} yAxisId={v.yAxisId} type="monotone" dataKey={v.key}
                       name={v.label} unit={v.unit} stroke={v.color}
-                      dot={false} strokeWidth={2} connectNulls />
+                      dot={false} strokeWidth={2} connectNulls isAnimationActive={false}
+                      activeDot={makeActiveDot(v.key, v.unit, v.color)} />
                   ))}
                   {activeVars.has('vpd') && <>
-                    <Line key="vpd_green"  dataKey="vpd_green"  yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#22c55e" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
-                    <Line key="vpd_yellow" dataKey="vpd_yellow" yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#facc15" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
-                    <Line key="vpd_red"    dataKey="vpd_red"    yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#ef4444" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
+                    <Line key="vpd_green"  dataKey="vpd_green"  yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#22c55e" dot={false} strokeWidth={2} connectNulls={false} legendType="none" isAnimationActive={false} activeDot={makeVpdActiveDot} />
+                    <Line key="vpd_yellow" dataKey="vpd_yellow" yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#facc15" dot={false} strokeWidth={2} connectNulls={false} legendType="none" isAnimationActive={false} activeDot={false} />
+                    <Line key="vpd_red"    dataKey="vpd_red"    yAxisId="vpd" type="monotone" name="DPV" unit=" kPa" stroke="#ef4444" dot={false} strokeWidth={2} connectNulls={false} legendType="none" isAnimationActive={false} activeDot={false} />
                   </>}
                 </LineChart>
               </ResponsiveContainer>
@@ -583,21 +840,25 @@ export default function TelemetryModule() {
               {enabledVars.map(v => (
                 <ChartCard key={v.key} title={v.label} icon={v.icon}>
                   <ResponsiveContainer width="100%" height={isMobile ? 160 : 180}>
-                    <LineChart data={data} margin={{ top: 4, right: isMobile ? 8 : 20, left: 0, bottom: 0 }}>
+                    <LineChart data={visibleData} margin={{ top: 4, right: isMobile ? 8 : 20, left: 0, bottom: 0 }}
+                      onMouseMove={(e: any) => { if (e.activeLabel != null) mouseTimestampRef.current = Number(e.activeLabel) }}
+                      onMouseLeave={() => { mouseTimestampRef.current = null }}
+                    >
                       <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                       <XAxis {...xAxisProps} />
                       <YAxis unit={v.unit} tick={{ fontSize: 11, fill: v.color }} width={isMobile ? 32 : 52}
                         domain={v.domain ?? ['auto', 'auto']}
                         tickLine={{ stroke: v.color }} axisLine={{ stroke: '#e5e7eb' }} />
-                      <Tooltip content={<CustomTooltip />} />
+                      <Tooltip cursor={{ stroke: '#6b7280', strokeWidth: 1, strokeDasharray: '4 2' }} content={() => null} />
                       {annotationLines(annotations)}
                       {v.key === 'vpd' ? <>
-                        <Line dataKey="vpd_green"  type="monotone" name="DPV" unit=" kPa" stroke="#22c55e" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
-                        <Line dataKey="vpd_yellow" type="monotone" name="DPV" unit=" kPa" stroke="#facc15" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
-                        <Line dataKey="vpd_red"    type="monotone" name="DPV" unit=" kPa" stroke="#ef4444" dot={false} strokeWidth={2} connectNulls={false} legendType="none" />
+                        <Line dataKey="vpd_green"  type="monotone" name="DPV" unit=" kPa" stroke="#22c55e" dot={false} strokeWidth={2} connectNulls={false} legendType="none" isAnimationActive={false} activeDot={makeVpdActiveDot} />
+                        <Line dataKey="vpd_yellow" type="monotone" name="DPV" unit=" kPa" stroke="#facc15" dot={false} strokeWidth={2} connectNulls={false} legendType="none" isAnimationActive={false} activeDot={false} />
+                        <Line dataKey="vpd_red"    type="monotone" name="DPV" unit=" kPa" stroke="#ef4444" dot={false} strokeWidth={2} connectNulls={false} legendType="none" isAnimationActive={false} activeDot={false} />
                       </> : (
                         <Line type="monotone" dataKey={v.key} name={v.label} unit={v.unit}
-                          stroke={v.color} dot={false} strokeWidth={2} connectNulls />
+                          stroke={v.color} dot={false} strokeWidth={2} connectNulls isAnimationActive={false}
+                          activeDot={makeActiveDot(v.key, v.unit, v.color)} />
                       )}
                     </LineChart>
                   </ResponsiveContainer>
@@ -605,6 +866,8 @@ export default function TelemetryModule() {
               ))}
             </div>
           )}
+
+          </div>{/* end chart area hover zone */}
         </div>
       </div>
     </div>

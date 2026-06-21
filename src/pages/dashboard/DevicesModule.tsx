@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useSiteContext } from '../../hooks/useSiteContext'
-import { getSiteDevices, type Device } from '../../services/devicesService'
+import { getSiteDevices, patchDeviceName, type Device } from '../../services/devicesService'
 
 function getStatus(device: Device): 'online' | 'warning' | 'offline' {
   if (!device.last_seen_at) return 'offline'
@@ -68,24 +69,100 @@ function SkeletonCard() {
   )
 }
 
-function DeviceCard({ device, onClick }: { device: Device; onClick: () => void }) {
+function DeviceCard({ device, onClick, onRename }: {
+  device: Device
+  onClick: () => void
+  onRename: (deviceId: string, name: string) => Promise<void>
+}) {
   const status = getStatus(device)
   const { bg, text } = STATUS_COLORS[status]
+
+  // Inline editing state for display_name
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState('')
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // display_name is considered custom when it differs from device_id
+  const hasCustomName = device.display_name !== device.device_id
+
+  function startEdit(e: React.MouseEvent) {
+    e.stopPropagation()
+    setEditValue(hasCustomName ? device.display_name : '')
+    setIsEditing(true)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  async function commitEdit() {
+    const trimmed = editValue.trim()
+    // If blank, use device_id (effectively clears the custom name)
+    const finalName = trimmed || device.device_id
+    if (finalName === device.display_name) { setIsEditing(false); return }
+    setSaving(true)
+    await onRename(device.device_id, finalName)
+    setSaving(false)
+    setIsEditing(false)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter')  { e.preventDefault(); commitEdit() }
+    if (e.key === 'Escape') { setIsEditing(false) }
+  }
 
   return (
     <div className={`device-card device-card--${status}`} onClick={onClick}>
       {/* Header */}
       <div style={{ padding: '12px 16px 10px', borderBottom: '1px solid var(--p-border-light)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          {/* Left: technical device_id */}
           <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--p-text)', lineHeight: 1.2 }}>
-            {device.display_name || device.device_id}
+            {device.device_id}
           </span>
-          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 'var(--p-radius-badge)', background: bg, color: text, whiteSpace: 'nowrap', flexShrink: 0 }}>
-            {STATUS_LABEL[status]}
-          </span>
+          {/* Right: editable display_name + status badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={commitEdit}
+                placeholder={device.device_id}
+                disabled={saving}
+                onClick={e => e.stopPropagation()}
+                style={{
+                  fontSize: 12, padding: '2px 6px', borderRadius: 6,
+                  border: '1px solid var(--p-primary)', outline: 'none',
+                  width: 130, color: 'var(--p-text)', background: 'var(--p-bg)',
+                }}
+              />
+            ) : (
+              <button
+                onClick={startEdit}
+                title="Editar nombre"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  fontSize: 12, padding: '2px 6px', borderRadius: 6,
+                  border: '1px solid transparent', background: 'transparent',
+                  color: hasCustomName ? 'var(--p-text-secondary)' : 'var(--p-text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                {hasCustomName ? device.display_name : 'Agregar nombre'}
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+            )}
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 'var(--p-radius-badge)', background: bg, color: text, whiteSpace: 'nowrap' }}>
+              {STATUS_LABEL[status]}
+            </span>
+          </div>
         </div>
+        {/* Gray line: only zone (device_id already shown bold above) */}
         <div style={{ marginTop: 4, fontSize: 12, color: 'var(--p-text-muted)' }}>
-          {device.device_id}{device.zone_name ? ` · ${device.zone_name}` : ''}
+          {device.zone_name ?? ''}
         </div>
       </div>
 
@@ -130,12 +207,31 @@ function DeviceCard({ device, onClick }: { device: Device; onClick: () => void }
 export default function DevicesModule() {
   const { siteId } = useSiteContext()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [search, setSearch] = useState('')
 
   const { data: devices, isLoading, isError } = useQuery({
     queryKey: ['devices', siteId],
     queryFn: () => getSiteDevices(siteId!),
     enabled: !!siteId,
     refetchInterval: 30_000,
+  })
+
+  // Rename a device and refresh the list
+  async function handleRename(deviceId: string, name: string) {
+    await patchDeviceName(deviceId, name)
+    await queryClient.invalidateQueries({ queryKey: ['devices', siteId] })
+  }
+
+  // Filter by device_id or display_name, case-insensitive
+  const filteredDevices = devices?.filter(d => {
+    if (!search.trim()) return true
+    const q = search.toLowerCase()
+    return (
+      d.device_id.toLowerCase().includes(q) ||
+      (d.display_name ?? '').toLowerCase().includes(q) ||
+      (d.zone_name ?? '').toLowerCase().includes(q)
+    )
   })
 
   if (!siteId) {
@@ -154,20 +250,42 @@ export default function DevicesModule() {
         </div>
       )}
 
+      {/* Search bar */}
+      <div style={{ padding: '12px 20px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          type="search"
+          placeholder="Buscar nodo por nombre, ID o zona..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{
+            flex: 1, maxWidth: 400,
+            padding: '7px 12px', borderRadius: 8, border: '1px solid var(--p-border)',
+            fontSize: 14, color: 'var(--p-text)', background: 'var(--p-bg)',
+            outline: 'none',
+          }}
+        />
+        {search && (
+          <span style={{ fontSize: 13, color: 'var(--p-text-muted)' }}>
+            {filteredDevices?.length ?? 0} resultado{filteredDevices?.length !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+
       <div className="devices-grid">
         {isLoading && Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
 
-        {!isLoading && devices?.map((device: Device) => (
+        {!isLoading && filteredDevices?.map((device: Device) => (
           <DeviceCard
             key={device.device_id}
             device={device}
-            onClick={() => navigate(`/dashboard/telemetry/${device.device_id}`)}
+            onClick={() => navigate(`/dashboard/telemetry/${device.device_id}`, { state: { display_name: device.display_name } })}
+            onRename={handleRename}
           />
         ))}
 
-        {!isLoading && !isError && devices?.length === 0 && (
+        {!isLoading && !isError && filteredDevices?.length === 0 && (
           <div style={{ gridColumn: '1/-1', padding: '48px 16px', textAlign: 'center', color: 'var(--p-text-muted)' }}>
-            No hay dispositivos en este site.
+            {search ? `Sin resultados para "${search}".` : 'No hay dispositivos en este site.'}
           </div>
         )}
       </div>

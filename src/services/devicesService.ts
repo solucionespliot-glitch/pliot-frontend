@@ -75,6 +75,10 @@ export async function getSiteDevices(siteId: string, zoneId?: string): Promise<D
   return data.devices
 }
 
+export async function patchDeviceName(deviceId: string, displayName: string): Promise<void> {
+  await api.patch(`/dashboard/devices/${deviceId}`, { display_name: displayName })
+}
+
 export async function getDeviceTelemetry(
   deviceId: string,
   params: TelemetryParams,
