@@ -7,6 +7,7 @@ import { setImpersonateOrg, fetchMe } from '../services/api'
 
 const NAV_LINKS = [
   { to: '/dashboard/devices',     label: 'Dispositivos'  },
+  { to: '/dashboard/lots',        label: 'Lotes'         },
   { to: '/dashboard/irrigation',  label: 'Riego'         },
   { to: '/dashboard/controllers', label: 'Controladores' },
   { to: '/dashboard/settings',    label: 'Configuración' },

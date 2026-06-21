@@ -9,6 +9,8 @@ import TelemetryModule from '../pages/dashboard/TelemetryModule'
 import IrrigationModule from '../pages/dashboard/IrrigationModule'
 import ControllersModule from '../pages/dashboard/ControllersModule'
 import SettingsModule from '../pages/dashboard/SettingsModule'
+import LotsModule from '../pages/dashboard/LotsModule'
+import LotDetailModule from '../pages/dashboard/LotDetailModule'
 
 function RootRedirect() {
   const { isAuthenticated, isLoading } = useAuth0()
@@ -49,6 +51,8 @@ export const router = createBrowserRouter([
       { path: 'irrigation', element: <IrrigationModule /> },
       { path: 'controllers', element: <ControllersModule /> },
       { path: 'settings', element: <SettingsModule /> },
+      { path: 'lots', element: <LotsModule /> },
+      { path: 'lots/:lotId', element: <LotDetailModule /> },
     ],
   },
 ])
