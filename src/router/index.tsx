@@ -11,6 +11,7 @@ import ControllersModule from '../pages/dashboard/ControllersModule'
 import SettingsModule from '../pages/dashboard/SettingsModule'
 import LotsModule from '../pages/dashboard/LotsModule'
 import LotDetailModule from '../pages/dashboard/LotDetailModule'
+import CycleDetailModule from '../pages/dashboard/CycleDetailModule'
 
 function RootRedirect() {
   const { isAuthenticated, isLoading } = useAuth0()
@@ -53,6 +54,7 @@ export const router = createBrowserRouter([
       { path: 'settings', element: <SettingsModule /> },
       { path: 'lots', element: <LotsModule /> },
       { path: 'lots/:lotId', element: <LotDetailModule /> },
+      { path: 'cycles/:cycleId', element: <CycleDetailModule /> },
     ],
   },
 ])

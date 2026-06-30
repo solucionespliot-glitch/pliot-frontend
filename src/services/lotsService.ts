@@ -14,18 +14,23 @@ export interface LotNode {
 }
 
 export interface LotEvent {
-  id:          string
-  event_type:  EventType
-  occurred_at: string
-  notes:       string | null
-  data:        Record<string, unknown> | null
-  created_at:  string
+  id:                string
+  event_type:        EventType
+  occurred_at:       string
+  notes:             string | null
+  data:              Record<string, unknown> | null
+  created_at:        string
+  // Set when the event was created from a cycle
+  cycle_id:          string | null
+  cycle_name:        string | null
+  cycle_crop_type:   string | null
+  cycle_started_at:  string | null
+  cycle_ended_at:    string | null
 }
 
 export interface Lot {
   id:          string
   name:        string
-  crop_type:   string | null
   area_ha:     number | null
   status:      LotStatus
   notes:       string | null
@@ -35,16 +40,21 @@ export interface Lot {
   last_event:  Pick<LotEvent, 'id' | 'event_type' | 'occurred_at' | 'notes'> | null
 }
 
+export interface MonitoringSummary {
+  monitored_at:     string  // YYYY-MM-DD
+  cycle_id:         string
+  cycle_name:       string
+  cycle_crop_type:  string
+  count:            number  // plants monitored on this date
+}
+
 export interface LotDetail extends Lot {
-  events: LotEvent[]
-  accumulators: {
-    degree_days: number | null
-  }
+  events:               LotEvent[]
+  monitoring_summaries: MonitoringSummary[]
 }
 
 export interface CreateLotPayload {
   name:      string
-  crop_type?: string
   area_ha?:  number
   status?:   LotStatus
   notes?:    string
@@ -53,7 +63,6 @@ export interface CreateLotPayload {
 
 export interface PatchLotPayload {
   name?:      string
-  crop_type?: string | null
   area_ha?:   number | null
   status?:    LotStatus
   notes?:     string | null

@@ -28,11 +28,6 @@ const EVENT_LABELS: Record<string, string> = {
   harvest:     'Cosecha',
 }
 
-const CROP_OPTIONS = [
-  'Tomate', 'Lechuga', 'Espinaca', 'Pimiento', 'Pepino',
-  'Berenjena', 'Zapallo', 'Chaucha', 'Apio', 'Perejil', 'Otro',
-]
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatRelative(iso: string): string {
@@ -51,12 +46,11 @@ function CreateLotModal({ siteId, devices, onClose, onCreated }: {
   onClose: () => void
   onCreated: () => void
 }) {
-  const [name,     setName]     = useState('')
-  const [cropType, setCropType] = useState('')
-  const [areaHa,   setAreaHa]   = useState('')
-  const [nodeIds,  setNodeIds]  = useState<string[]>([])
-  const [saving,   setSaving]   = useState(false)
-  const [error,    setError]    = useState<string | null>(null)
+  const [name,    setName]    = useState('')
+  const [areaHa,  setAreaHa]  = useState('')
+  const [nodeIds, setNodeIds] = useState<string[]>([])
+  const [saving,  setSaving]  = useState(false)
+  const [error,   setError]   = useState<string | null>(null)
 
   function toggleNode(id: string) {
     setNodeIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
@@ -69,8 +63,7 @@ function CreateLotModal({ siteId, devices, onClose, onCreated }: {
     setError(null)
     try {
       const payload: CreateLotPayload = { name: name.trim() }
-      if (cropType) payload.crop_type = cropType
-      if (areaHa)   payload.area_ha   = Number(areaHa)
+      if (areaHa) payload.area_ha = Number(areaHa)
       if (nodeIds.length > 0) payload.node_ids = nodeIds
       await createLot(siteId, payload)
       onCreated()
@@ -89,6 +82,7 @@ function CreateLotModal({ siteId, devices, onClose, onCreated }: {
       <div style={{
         background: 'var(--p-surface)', borderRadius: 12, padding: 24,
         width: '100%', maxWidth: 480, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+        maxHeight: '90vh', overflowY: 'auto',
       }} onClick={e => e.stopPropagation()}>
         <h3 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700 }}>Nuevo lote</h3>
 
@@ -98,14 +92,6 @@ function CreateLotModal({ siteId, devices, onClose, onCreated }: {
             Nombre *
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Ej: Lote A"
               style={inputStyle} autoFocus />
-          </label>
-
-          <label style={labelStyle}>
-            Cultivo
-            <select value={cropType} onChange={e => setCropType(e.target.value)} style={inputStyle}>
-              <option value="">— Sin especificar —</option>
-              {CROP_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
           </label>
 
           <label style={labelStyle}>
@@ -119,7 +105,7 @@ function CreateLotModal({ siteId, devices, onClose, onCreated }: {
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--p-text-secondary)', display: 'block', marginBottom: 6 }}>
                 Nodos asignados
               </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 140, overflowY: 'auto', paddingRight: 4 }}>
                 {devices.map(d => {
                   const selected = nodeIds.includes(d.id)
                   return (
@@ -182,8 +168,8 @@ function LotCard({ lot, onClick, onStatusChange, onDelete }: {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--p-text)' }}>{lot.name}</div>
-            {lot.crop_type && (
-              <div style={{ fontSize: 12, color: 'var(--p-text-muted)', marginTop: 2 }}>{lot.crop_type}{lot.area_ha ? ` · ${lot.area_ha} ha` : ''}</div>
+            {lot.area_ha != null && (
+              <div style={{ fontSize: 12, color: 'var(--p-text-muted)', marginTop: 2 }}>{lot.area_ha} ha</div>
             )}
           </div>
           {/* Status badge — click cycles through statuses */}
