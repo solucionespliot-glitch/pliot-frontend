@@ -1,5 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { useAuth0 } from '@auth0/auth0-react'
+import { useQuery } from '@tanstack/react-query'
+import { fetchMe } from '../services/api'
 import PrivateRoute from '../components/PrivateRoute'
 import LoginPage from '../pages/LoginPage'
 import SiteSelector from '../pages/SiteSelector'
@@ -12,6 +14,14 @@ import SettingsModule from '../pages/dashboard/SettingsModule'
 import LotsModule from '../pages/dashboard/LotsModule'
 import LotDetailModule from '../pages/dashboard/LotDetailModule'
 import CycleDetailModule from '../pages/dashboard/CycleDetailModule'
+
+// Redirects to /dashboard if the org doesn't have the required feature
+function FeatureRoute({ feature, children }: { feature: string; children: React.ReactNode }) {
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
+  if (!me) return null
+  if (!me.features[feature]) return <Navigate to="/dashboard" replace />
+  return <>{children}</>
+}
 
 function RootRedirect() {
   const { isAuthenticated, isLoading } = useAuth0()
@@ -52,9 +62,9 @@ export const router = createBrowserRouter([
       { path: 'irrigation', element: <IrrigationModule /> },
       { path: 'controllers', element: <ControllersModule /> },
       { path: 'settings', element: <SettingsModule /> },
-      { path: 'lots', element: <LotsModule /> },
-      { path: 'lots/:lotId', element: <LotDetailModule /> },
-      { path: 'cycles/:cycleId', element: <CycleDetailModule /> },
+      { path: 'lots', element: <FeatureRoute feature="lots"><LotsModule /></FeatureRoute> },
+      { path: 'lots/:lotId', element: <FeatureRoute feature="lots"><LotDetailModule /></FeatureRoute> },
+      { path: 'cycles/:cycleId', element: <FeatureRoute feature="lots"><CycleDetailModule /></FeatureRoute> },
     ],
   },
 ])

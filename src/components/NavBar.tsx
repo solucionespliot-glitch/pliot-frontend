@@ -5,12 +5,12 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { getOrganizations, impersonate } from '../services/settingsService'
 import { setImpersonateOrg, fetchMe } from '../services/api'
 
-const NAV_LINKS = [
-  { to: '/dashboard/devices',     label: 'Dispositivos'  },
-  { to: '/dashboard/lots',        label: 'Lotes'         },
-  { to: '/dashboard/irrigation',  label: 'Riego'         },
-  { to: '/dashboard/controllers', label: 'Controladores' },
-  { to: '/dashboard/settings',    label: 'Configuración' },
+const BASE_NAV_LINKS = [
+  { to: '/dashboard/devices',     label: 'Dispositivos',  feature: null    },
+  { to: '/dashboard/lots',        label: 'Lotes',         feature: 'lots'  },
+  { to: '/dashboard/irrigation',  label: 'Riego',         feature: null    },
+  { to: '/dashboard/controllers', label: 'Controladores', feature: null    },
+  { to: '/dashboard/settings',    label: 'Configuración', feature: null    },
 ]
 
 const activeLinkStyle: React.CSSProperties = {
@@ -46,6 +46,8 @@ export default function NavBar() {
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const isSuperuser = me?.role === 'superuser'
+  const features = me?.features ?? {}
+  const navLinks = BASE_NAV_LINKS.filter(l => !l.feature || features[l.feature])
 
   const { data: orgs = [] } = useQuery({
     queryKey: ['organizations'],
@@ -90,7 +92,7 @@ export default function NavBar() {
         {/* Desktop: nav links (center) */}
         {!isMobile && (
           <div style={{ display: 'flex', gap: 20 }}>
-            {NAV_LINKS.map(({ to, label }) => (
+            {navLinks.map(({ to, label }) => (
               <NavLink key={to} to={to}
                 style={({ isActive }) => isActive ? { ...linkStyle, ...activeLinkStyle } : linkStyle}>
                 {label}
@@ -162,7 +164,7 @@ export default function NavBar() {
       {/* Mobile: dropdown menu */}
       {isMobile && menuOpen && (
         <div style={{ padding: '8px 20px 16px', borderTop: '1px solid #F3F4F6', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {NAV_LINKS.map(({ to, label }) => (
+          {navLinks.map(({ to, label }) => (
             <NavLink
               key={to} to={to}
               onClick={() => setMenuOpen(false)}
