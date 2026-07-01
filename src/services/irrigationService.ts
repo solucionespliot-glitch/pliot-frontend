@@ -34,9 +34,11 @@ export interface UpdateTurnData {
 export interface Controller {
   id: string
   device_name: string
+  device_type: string
   sync_status: 'synced' | 'pending' | 'error'
   override_mode: 'none' | 'temporary_24h' | 'temporary_48h' | 'permanent'
   last_seen_at: string | null
+  context: Record<string, unknown> | null
 }
 
 export interface Fogger {

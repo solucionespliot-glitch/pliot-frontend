@@ -75,6 +75,22 @@ export async function getSiteDevices(siteId: string, zoneId?: string): Promise<D
   return data.devices
 }
 
+export interface Gateway {
+  id: string
+  device_id: string
+  display_name: string
+  enabled: boolean
+  last_seen_at: string | null
+  online: boolean
+  wifi_rssi: number | null
+  uptime_seconds: number | null
+}
+
+export async function getSiteGateways(siteId: string): Promise<Gateway[]> {
+  const { data } = await api.get<{ gateways: Gateway[] }>(`/dashboard/sites/${siteId}/gateways`)
+  return data.gateways
+}
+
 export async function patchDeviceName(deviceId: string, displayName: string): Promise<void> {
   await api.patch(`/dashboard/devices/${deviceId}`, { display_name: displayName })
 }

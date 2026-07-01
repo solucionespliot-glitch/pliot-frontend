@@ -50,6 +50,52 @@ const OVERRIDE_OPTIONS: { value: Controller['override_mode']; label: string }[] 
   { value: 'permanent',     label: 'Permanente'      },
 ]
 
+// ── Gateway row ───────────────────────────────────────────────────────────────
+
+function formatUptime(seconds: number | null): string {
+  if (seconds == null) return '—'
+  const h = Math.floor(seconds / 3600)
+  const d = Math.floor(h / 24)
+  if (d > 0) return `${d}d ${h % 24}h`
+  if (h > 0) return `${h}h ${Math.floor((seconds % 3600) / 60)}m`
+  return `${Math.floor(seconds / 60)}m`
+}
+
+function rssiColor(rssi: number | null): string {
+  if (rssi == null) return '#9ca3af'
+  if (rssi >= -70) return '#16a34a'
+  if (rssi >= -85) return '#ca8a04'
+  return '#dc2626'
+}
+
+function GatewayRow({ controller }: { controller: Controller }) {
+  const rssi    = controller.context?.last_wifi_rssi as number | null ?? null
+  const uptime  = controller.context?.last_uptime_seconds as number | null ?? null
+  const online  = controller.last_seen_at
+    ? (Date.now() - new Date(controller.last_seen_at).getTime()) < 5 * 60 * 1000
+    : false
+
+  return (
+    <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
+      <td style={{ padding: '12px 16px', fontWeight: 500, color: '#111827' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: online ? '#16a34a' : '#dc2626', flexShrink: 0 }} />
+          {controller.device_name}
+        </span>
+      </td>
+      <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600, color: rssiColor(rssi) }}>
+        {rssi != null ? `${rssi} dBm` : '—'}
+      </td>
+      <td style={{ padding: '12px 16px', fontSize: 13, color: '#6b7280' }}>
+        {formatUptime(uptime)}
+      </td>
+      <td style={{ padding: '12px 16px', fontSize: 13, color: '#6b7280' }}>
+        {formatHeartbeat(controller.last_seen_at)}
+      </td>
+    </tr>
+  )
+}
+
 // ── Controller row ────────────────────────────────────────────────────────────
 
 function ControllerRow({ controller }: { controller: Controller }) {
@@ -93,10 +139,13 @@ function ControllerRow({ controller }: { controller: Controller }) {
 
 export default function ControllersModule() {
   const {
-    data: controllers,
+    data: allControllers,
     isLoading: loadingControllers,
     isError: errorControllers,
   } = useQuery({ queryKey: ['controllers'], queryFn: getControllers })
+
+  const controllers = allControllers?.filter(c => c.device_type !== 'gateway') ?? []
+  const gateways    = allControllers?.filter(c => c.device_type === 'gateway')  ?? []
 
   const {
     data: foggers,
@@ -111,6 +160,27 @@ export default function ControllersModule() {
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 32 }}>
       <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: '#111827' }}>Controladores y Foggers</h2>
+
+      {/* Gateways section — only shown when there are gateways in the site */}
+      {gateways.length > 0 && (
+        <div>
+          {sectionTitle('Gateways LoRa')}
+          <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #e5e7eb' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+              <thead>
+                <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                  {['Gateway', 'WiFi RSSI', 'Uptime', 'Último heartbeat'].map(h => (
+                    <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {gateways.map(c => <GatewayRow key={c.id} controller={c} />)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Controllers section */}
       <div>
