@@ -7,7 +7,8 @@ import { setImpersonateOrg, fetchMe } from '../services/api'
 
 const BASE_NAV_LINKS = [
   { to: '/dashboard/devices',     label: 'Dispositivos',  feature: null    },
-  { to: '/dashboard/lots',        label: 'Lotes',         feature: 'lots'  },
+  { to: '/dashboard/lots',        label: 'Lotes',         feature: 'lots'    },
+  { to: '/dashboard/nursery',     label: 'Plantinera',    feature: 'nursery' },
   { to: '/dashboard/irrigation',  label: 'Riego',         feature: null    },
   { to: '/dashboard/controllers', label: 'Controladores', feature: null    },
   { to: '/dashboard/settings',    label: 'Configuración', feature: null    },

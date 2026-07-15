@@ -14,6 +14,7 @@ import SettingsModule from '../pages/dashboard/SettingsModule'
 import LotsModule from '../pages/dashboard/LotsModule'
 import LotDetailModule from '../pages/dashboard/LotDetailModule'
 import CycleDetailModule from '../pages/dashboard/CycleDetailModule'
+import NurseryModule from '../pages/dashboard/NurseryModule'
 
 // Redirects to /dashboard if the org doesn't have the required feature
 function FeatureRoute({ feature, children }: { feature: string; children: React.ReactNode }) {
@@ -65,6 +66,7 @@ export const router = createBrowserRouter([
       { path: 'lots', element: <FeatureRoute feature="lots"><LotsModule /></FeatureRoute> },
       { path: 'lots/:lotId', element: <FeatureRoute feature="lots"><LotDetailModule /></FeatureRoute> },
       { path: 'cycles/:cycleId', element: <FeatureRoute feature="lots"><CycleDetailModule /></FeatureRoute> },
+      { path: 'nursery', element: <FeatureRoute feature="nursery"><NurseryModule /></FeatureRoute> },
     ],
   },
 ])
