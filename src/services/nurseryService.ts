@@ -161,6 +161,25 @@ export async function createCustomer(payload: CreateCustomerPayload): Promise<Nu
   return data.customer
 }
 
+export interface PatchCustomerPayload {
+  name?:             string
+  contact_name?:     string | null
+  email?:            string | null
+  phone?:            string | null
+  tax_id_type?:      'cuit' | 'cuil' | 'dni' | 'passport' | 'other' | null
+  tax_id?:           string | null
+  fiscal_condition?: string | null
+  billing_address?:  string | null
+  delivery_address?: string | null
+  notes?:            string | null
+  active?:           boolean
+}
+
+export async function updateCustomer(customerId: string, payload: PatchCustomerPayload): Promise<NurseryCustomer> {
+  const { data } = await api.patch<{ customer: NurseryCustomer }>(`/dashboard/nursery/customers/${customerId}`, payload)
+  return data.customer
+}
+
 // Orders
 export async function getOrders(params?: {
   status?:      OrderStatus

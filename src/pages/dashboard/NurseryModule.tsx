@@ -6,9 +6,11 @@ import {
   getCustomers,
   createOrder,
   createCustomer,
+  updateCustomer,
   type NurseryOrderSummary,
   type OrderStatus,
   type NurseryCustomer,
+  type PatchCustomerPayload,
 } from '../../services/nurseryService'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -289,6 +291,253 @@ function OrderCard({ order }: { order: NurseryOrderSummary }) {
   )
 }
 
+// ── Customer form modal ───────────────────────────────────────────────────────
+
+const TAX_ID_TYPE_LABELS: Record<string, string> = {
+  cuit: 'CUIT', cuil: 'CUIL', dni: 'DNI', passport: 'Pasaporte', other: 'Otro',
+}
+
+function CustomerFormModal({ customer, onClose, onSaved }: {
+  customer?: NurseryCustomer
+  onClose:   () => void
+  onSaved:   () => void
+}) {
+  const isEdit = !!customer
+  const [name,            setName]            = useState(customer?.name ?? '')
+  const [contactName,     setContactName]     = useState(customer?.contact_name ?? '')
+  const [email,           setEmail]           = useState(customer?.email ?? '')
+  const [phone,           setPhone]           = useState(customer?.phone ?? '')
+  const [taxIdType,       setTaxIdType]       = useState(customer?.tax_id_type ?? '')
+  const [taxId,           setTaxId]           = useState(customer?.tax_id ?? '')
+  const [fiscalCondition, setFiscalCondition] = useState(customer?.fiscal_condition ?? '')
+  const [saving,          setSaving]          = useState(false)
+  const [error,           setError]           = useState<string | null>(null)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) { setError('El nombre es obligatorio'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      if (isEdit && customer) {
+        const payload: PatchCustomerPayload = {
+          name:             name.trim(),
+          contact_name:     contactName.trim() || null,
+          email:            email.trim() || null,
+          phone:            phone.trim() || null,
+          tax_id_type:      (taxIdType as PatchCustomerPayload['tax_id_type']) || null,
+          tax_id:           taxId.trim() || null,
+          fiscal_condition: fiscalCondition.trim() || null,
+        }
+        await updateCustomer(customer.id, payload)
+      } else {
+        await createCustomer({
+          name:             name.trim(),
+          contact_name:     contactName.trim() || undefined,
+          email:            email.trim() || undefined,
+          phone:            phone.trim() || undefined,
+          tax_id_type:      (taxIdType as PatchCustomerPayload['tax_id_type']) || undefined,
+          tax_id:           taxId.trim() || undefined,
+          fiscal_condition: fiscalCondition.trim() || undefined,
+        })
+      }
+      onSaved()
+    } catch {
+      setError('No se pudo guardar el cliente')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 16,
+    }} onClick={onClose}>
+      <div style={{
+        background: 'var(--p-surface)', borderRadius: 12, padding: 24,
+        width: '100%', maxWidth: 480, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+        maxHeight: '90vh', overflowY: 'auto',
+      }} onClick={e => e.stopPropagation()}>
+        <h3 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700 }}>
+          {isEdit ? 'Editar cliente' : 'Nuevo cliente'}
+        </h3>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <label style={labelStyle}>
+            Nombre / Razón social *
+            <input value={name} onChange={e => setName(e.target.value)}
+              style={inputStyle} autoFocus placeholder="Ej: Juan García / Agro S.A." />
+          </label>
+
+          <label style={labelStyle}>
+            Contacto (persona)
+            <input value={contactName} onChange={e => setContactName(e.target.value)}
+              style={inputStyle} placeholder="Nombre del contacto en la empresa" />
+          </label>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <label style={labelStyle}>
+              Teléfono
+              <input value={phone} onChange={e => setPhone(e.target.value)}
+                style={inputStyle} placeholder="Ej: 11 2345-6789" />
+            </label>
+            <label style={labelStyle}>
+              Email
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                style={inputStyle} placeholder="correo@ejemplo.com" />
+            </label>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <label style={labelStyle}>
+              Tipo doc.
+              <select value={taxIdType} onChange={e => setTaxIdType(e.target.value)} style={inputStyle}>
+                <option value="">Sin documento</option>
+                {Object.entries(TAX_ID_TYPE_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Número
+              <input value={taxId} onChange={e => setTaxId(e.target.value)}
+                style={inputStyle} placeholder="Ej: 20-12345678-9" />
+            </label>
+          </div>
+
+          <label style={labelStyle}>
+            Condición fiscal
+            <input value={fiscalCondition} onChange={e => setFiscalCondition(e.target.value)}
+              style={inputStyle} placeholder="Ej: Responsable Inscripto" />
+          </label>
+
+          {error && (
+            <div style={{ fontSize: 13, color: '#b91c1c', background: '#fef2f2', padding: '8px 12px', borderRadius: 6 }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+            <button type="button" onClick={onClose} style={secondaryBtnStyle}>Cancelar</button>
+            <button type="submit" disabled={saving} style={primaryBtnStyle}>
+              {saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear cliente'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Customers tab ─────────────────────────────────────────────────────────────
+
+function CustomersTab() {
+  const queryClient                   = useQueryClient()
+  const [showForm,   setShowForm]     = useState(false)
+  const [editing,    setEditing]      = useState<NurseryCustomer | undefined>()
+  const [search,     setSearch]       = useState('')
+
+  const { data: customers = [], isLoading } = useQuery({
+    queryKey: ['nursery-customers'],
+    queryFn:  getCustomers,
+  })
+
+  const filtered = customers.filter(c =>
+    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    (c.phone ?? '').includes(search) ||
+    (c.tax_id ?? '').includes(search),
+  )
+
+  function openEdit(c: NurseryCustomer) { setEditing(c); setShowForm(true) }
+  function openCreate()                 { setEditing(undefined); setShowForm(true) }
+
+  function onSaved() {
+    setShowForm(false)
+    queryClient.invalidateQueries({ queryKey: ['nursery-customers'] })
+  }
+
+  return (
+    <div>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center' }}>
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Buscar por nombre, teléfono o CUIT..."
+          style={{ ...inputStyle, flex: 1, maxWidth: 340 }}
+        />
+        <button onClick={openCreate} style={primaryBtnStyle}>+ Nuevo cliente</button>
+      </div>
+
+      {isLoading && (
+        <div style={{ color: 'var(--p-text-muted)', padding: 32, textAlign: 'center' }}>Cargando...</div>
+      )}
+
+      {!isLoading && filtered.length === 0 && (
+        <div style={{
+          padding: '48px 24px', textAlign: 'center',
+          background: 'var(--p-surface)', borderRadius: 12, border: '1px solid var(--p-border)',
+        }}>
+          <div style={{ fontSize: 15, color: 'var(--p-text-secondary)', marginBottom: 12 }}>
+            {search ? 'Sin resultados para esa búsqueda.' : 'No hay clientes cargados todavía.'}
+          </div>
+          {!search && <button onClick={openCreate} style={primaryBtnStyle}>Crear el primer cliente</button>}
+        </div>
+      )}
+
+      {/* Customer list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {filtered.map(c => (
+          <div key={c.id} style={{
+            background: 'var(--p-surface)', border: '1px solid var(--p-border)',
+            borderRadius: 10, padding: '12px 16px',
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            {/* Avatar letter */}
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+              background: 'var(--p-primary)', color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 16, fontWeight: 700,
+            }}>
+              {c.name.charAt(0).toUpperCase()}
+            </div>
+
+            {/* Info */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--p-text)' }}>{c.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--p-text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 2 }}>
+                {c.contact_name && <span>{c.contact_name}</span>}
+                {c.phone        && <span>{c.phone}</span>}
+                {c.email        && <span>{c.email}</span>}
+                {c.tax_id       && <span>{TAX_ID_TYPE_LABELS[c.tax_id_type ?? ''] ?? c.tax_id_type}: {c.tax_id}</span>}
+                {c.fiscal_condition && <span>{c.fiscal_condition}</span>}
+              </div>
+            </div>
+
+            {/* Edit button */}
+            <button onClick={() => openEdit(c)} style={{
+              flexShrink: 0, fontSize: 13, padding: '5px 12px', borderRadius: 7,
+              border: '1px solid var(--p-border)', background: 'var(--p-bg)',
+              color: 'var(--p-text-secondary)', cursor: 'pointer',
+            }}>
+              Editar
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {showForm && (
+        <CustomerFormModal
+          customer={editing}
+          onClose={() => setShowForm(false)}
+          onSaved={onSaved}
+        />
+      )}
+    </div>
+  )
+}
+
 // ── Module ────────────────────────────────────────────────────────────────────
 
 const STATUS_FILTER_OPTIONS: { value: OrderStatus | ''; label: string }[] = [
@@ -301,9 +550,12 @@ const STATUS_FILTER_OPTIONS: { value: OrderStatus | ''; label: string }[] = [
   { value: 'cancelled',        label: 'Cancelados'       },
 ]
 
+type Tab = 'orders' | 'customers'
+
 export default function NurseryModule() {
   const { siteId }    = useSiteContext()
   const queryClient   = useQueryClient()
+  const [tab,          setTab]          = useState<Tab>('orders')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | ''>('in_production')
   const [showCreate,   setShowCreate]   = useState(false)
 
@@ -341,30 +593,53 @@ export default function NurseryModule() {
           Plantinera
         </h2>
 
-        {/* Active order summary badges */}
-        {orders.length > 0 && (
-          <div style={{ display: 'flex', gap: 6 }}>
-            {activeStatuses.map(s => {
-              const count = countByStatus[s] ?? 0
-              if (!count) return null
-              const cfg = STATUS_CONFIG[s]
-              return (
-                <span key={s} style={{
-                  fontSize: 11, fontWeight: 700,
-                  padding: '3px 10px', borderRadius: 20,
-                  background: cfg.bg, border: `1px solid ${cfg.border}`, color: cfg.text,
-                }}>
-                  {count} {cfg.label.toLowerCase()}
-                </span>
-              )
-            })}
-          </div>
-        )}
-
-        <button onClick={() => setShowCreate(true)} style={primaryBtnStyle}>
-          + Nuevo pedido
-        </button>
+        {tab === 'orders' && <>
+          {/* Active order summary badges */}
+          {orders.length > 0 && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              {activeStatuses.map(s => {
+                const count = countByStatus[s] ?? 0
+                if (!count) return null
+                const cfg = STATUS_CONFIG[s]
+                return (
+                  <span key={s} style={{
+                    fontSize: 11, fontWeight: 700,
+                    padding: '3px 10px', borderRadius: 20,
+                    background: cfg.bg, border: `1px solid ${cfg.border}`, color: cfg.text,
+                  }}>
+                    {count} {cfg.label.toLowerCase()}
+                  </span>
+                )
+              })}
+            </div>
+          )}
+          <button onClick={() => setShowCreate(true)} style={primaryBtnStyle}>
+            + Nuevo pedido
+          </button>
+        </>}
       </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--p-border)', paddingBottom: 0 }}>
+        {([
+          { key: 'orders',    label: 'Pedidos'   },
+          { key: 'customers', label: 'Clientes'  },
+        ] as { key: Tab; label: string }[]).map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{
+            padding: '8px 18px', border: 'none', background: 'none', cursor: 'pointer',
+            fontSize: 14, fontWeight: tab === t.key ? 700 : 400,
+            color: tab === t.key ? 'var(--p-primary)' : 'var(--p-text-secondary)',
+            borderBottom: tab === t.key ? '2px solid var(--p-primary)' : '2px solid transparent',
+            marginBottom: -1,
+          }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'customers' && <CustomersTab />}
+
+      {tab === 'orders' && <>
 
       {/* Filters bar */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
@@ -423,6 +698,8 @@ export default function NurseryModule() {
           <OrderCard key={order.id} order={order} />
         ))}
       </div>
+
+      </>}
 
       {showCreate && (
         <CreateOrderModal
