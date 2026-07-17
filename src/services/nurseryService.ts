@@ -17,17 +17,36 @@ export type EventType =
   | 'irrigation' | 'fertilization' | 'application'
   | 'observation' | 'photo' | 'treatment' | 'note' | 'bulk_elimination'
 
-export interface NurseryCustomer {
+export interface NurseryCustomerLocation {
   id:               string
   name:             string
   contact_name:     string | null
-  email:            string | null
   phone:            string | null
-  tax_id_type:      string | null
-  tax_id:           string | null
-  fiscal_condition: string | null
+  delivery_address: string | null
   active:           boolean
-  created_at:       string
+}
+
+export interface NurseryCustomer {
+  id:                 string
+  name:               string
+  parent_customer_id: string | null
+  contact_name:       string | null
+  email:              string | null
+  phone:              string | null
+  tax_id_type:        string | null
+  tax_id:             string | null
+  fiscal_condition:   string | null
+  delivery_address:   string | null
+  active:             boolean
+  created_at:         string
+  // Only present on top-level customers (producers)
+  locations?:         NurseryCustomerLocation[]
+}
+
+export interface CustomerConflict {
+  conflict: true
+  field:    'name' | 'phone' | 'tax_id'
+  existing: { id: string; name: string; phone: string | null; tax_id: string | null }
 }
 
 export interface NurseryOrderSummary {
@@ -97,13 +116,16 @@ export interface NurseryTray {
 }
 
 export interface CreateCustomerPayload {
-  name:             string
-  contact_name?:    string
-  email?:           string
-  phone?:           string
-  tax_id_type?:     'cuit' | 'cuil' | 'dni' | 'passport' | 'other'
-  tax_id?:          string
-  fiscal_condition?: string
+  name:               string
+  parent_customer_id?: string
+  contact_name?:      string
+  email?:             string
+  phone?:             string
+  tax_id_type?:       'cuit' | 'cuil' | 'dni' | 'passport' | 'other'
+  tax_id?:            string
+  fiscal_condition?:  string
+  delivery_address?:  string
+  force?:             boolean
 }
 
 export interface CreateOrderPayload {
@@ -156,23 +178,43 @@ export async function getCustomers(): Promise<NurseryCustomer[]> {
   return data.customers
 }
 
-export async function createCustomer(payload: CreateCustomerPayload): Promise<NurseryCustomer> {
-  const { data } = await api.post<{ customer: NurseryCustomer }>('/dashboard/nursery/customers', payload)
-  return data.customer
+// Returns the created customer, or throws with a CustomerConflict attached to the error
+// when a duplicate is detected (HTTP 409). The caller can re-send with force:true to bypass.
+export async function createCustomer(
+  payload: CreateCustomerPayload,
+): Promise<NurseryCustomer> {
+  try {
+    const { data } = await api.post<{ customer: NurseryCustomer }>('/dashboard/nursery/customers', payload)
+    return data.customer
+  } catch (err: unknown) {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'response' in err &&
+      (err as { response?: { status?: number; data?: unknown } }).response?.status === 409
+    ) {
+      const conflict = (err as { response: { data: CustomerConflict } }).response.data
+      const conflictError = new Error('duplicate_customer') as Error & { conflict: CustomerConflict }
+      conflictError.conflict = conflict
+      throw conflictError
+    }
+    throw err
+  }
 }
 
 export interface PatchCustomerPayload {
-  name?:             string
-  contact_name?:     string | null
-  email?:            string | null
-  phone?:            string | null
-  tax_id_type?:      'cuit' | 'cuil' | 'dni' | 'passport' | 'other' | null
-  tax_id?:           string | null
-  fiscal_condition?: string | null
-  billing_address?:  string | null
-  delivery_address?: string | null
-  notes?:            string | null
-  active?:           boolean
+  name?:               string
+  parent_customer_id?: string | null
+  contact_name?:       string | null
+  email?:              string | null
+  phone?:              string | null
+  tax_id_type?:        'cuit' | 'cuil' | 'dni' | 'passport' | 'other' | null
+  tax_id?:             string | null
+  fiscal_condition?:   string | null
+  billing_address?:    string | null
+  delivery_address?:   string | null
+  notes?:              string | null
+  active?:             boolean
 }
 
 export async function updateCustomer(customerId: string, payload: PatchCustomerPayload): Promise<NurseryCustomer> {

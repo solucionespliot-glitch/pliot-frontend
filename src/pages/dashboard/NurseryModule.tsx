@@ -11,6 +11,7 @@ import {
   type OrderStatus,
   type NurseryCustomer,
   type PatchCustomerPayload,
+  type CustomerConflict,
 } from '../../services/nurseryService'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -156,14 +157,23 @@ function CreateOrderModal({ siteId, onClose, onCreated }: {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-          {/* Customer selector */}
+          {/* Customer selector — shows producers with their quintas grouped */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <label style={labelStyle}>
               Cliente
               <select value={customerId} onChange={e => setCustomerId(e.target.value)} style={inputStyle}>
                 <option value="">Sin cliente asignado</option>
                 {customers.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ''}</option>
+                  c.locations && c.locations.length > 0 ? (
+                    <optgroup key={c.id} label={c.name}>
+                      <option value={c.id}>{c.name} (productor)</option>
+                      {c.locations.map(loc => (
+                        <option key={loc.id} value={loc.id}>↳ {loc.name}{loc.phone ? ` · ${loc.phone}` : ''}</option>
+                      ))}
+                    </optgroup>
+                  ) : (
+                    <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ''}</option>
+                  )
                 ))}
               </select>
             </label>
@@ -291,61 +301,138 @@ function OrderCard({ order }: { order: NurseryOrderSummary }) {
   )
 }
 
-// ── Customer form modal ───────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const TAX_ID_TYPE_LABELS: Record<string, string> = {
   cuit: 'CUIT', cuil: 'CUIL', dni: 'DNI', passport: 'Pasaporte', other: 'Otro',
 }
 
-function CustomerFormModal({ customer, onClose, onSaved }: {
-  customer?: NurseryCustomer
-  onClose:   () => void
-  onSaved:   () => void
+const FISCAL_CONDITIONS = [
+  'Responsable Inscripto',
+  'Monotributista',
+  'Exento',
+  'Consumidor Final',
+  'No Responsable',
+]
+
+// ── Duplicate warning banner ──────────────────────────────────────────────────
+
+function DuplicateWarning({ conflict, onForce, onCancel }: {
+  conflict: CustomerConflict
+  onForce:  () => void
+  onCancel: () => void
+}) {
+  const fieldLabel = conflict.field === 'name'   ? 'nombre'    :
+                     conflict.field === 'phone'   ? 'teléfono'  : 'documento'
+  return (
+    <div style={{
+      background: '#fffbeb', border: '1px solid #fcd34d',
+      borderRadius: 8, padding: '12px 14px', fontSize: 13,
+    }}>
+      <div style={{ fontWeight: 700, color: '#92400e', marginBottom: 6 }}>
+        Cliente ya registrado
+      </div>
+      <div style={{ color: '#78350f', marginBottom: 10 }}>
+        Ya existe un cliente con el mismo {fieldLabel}:{' '}
+        <strong>{conflict.existing.name}</strong>
+        {conflict.existing.phone && ` · ${conflict.existing.phone}`}
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onForce} style={{
+          ...primaryBtnStyle, fontSize: 12, padding: '5px 12px',
+          background: '#d97706',
+        }}>
+          Cargar igual
+        </button>
+        <button onClick={onCancel} style={{ ...secondaryBtnStyle, fontSize: 12, padding: '5px 12px' }}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Customer form modal ───────────────────────────────────────────────────────
+
+function CustomerFormModal({ customer, customers, onClose, onSaved }: {
+  customer?:  NurseryCustomer
+  customers:  NurseryCustomer[]       // full list to populate parent selector
+  onClose:    () => void
+  onSaved:    () => void
 }) {
   const isEdit = !!customer
-  const [name,            setName]            = useState(customer?.name ?? '')
-  const [contactName,     setContactName]     = useState(customer?.contact_name ?? '')
-  const [email,           setEmail]           = useState(customer?.email ?? '')
-  const [phone,           setPhone]           = useState(customer?.phone ?? '')
-  const [taxIdType,       setTaxIdType]       = useState(customer?.tax_id_type ?? '')
-  const [taxId,           setTaxId]           = useState(customer?.tax_id ?? '')
-  const [fiscalCondition, setFiscalCondition] = useState(customer?.fiscal_condition ?? '')
-  const [saving,          setSaving]          = useState(false)
-  const [error,           setError]           = useState<string | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  // Form state
+  const [name,              setName]            = useState(customer?.name ?? '')
+  const [parentCustomerId,  setParentCustomerId] = useState(customer?.parent_customer_id ?? '')
+  const [contactName,       setContactName]     = useState(customer?.contact_name ?? '')
+  const [email,             setEmail]           = useState(customer?.email ?? '')
+  const [phone,             setPhone]           = useState(customer?.phone ?? '')
+  const [taxIdType,         setTaxIdType]       = useState(customer?.tax_id_type ?? '')
+  const [taxId,             setTaxId]           = useState(customer?.tax_id ?? '')
+  const [fiscalCondition,   setFiscalCondition] = useState(customer?.fiscal_condition ?? '')
+  const [deliveryAddress,   setDeliveryAddress] = useState(customer?.delivery_address ?? '')
+
+  // UI state
+  const [saving,    setSaving]    = useState(false)
+  const [error,     setError]     = useState<string | null>(null)
+  const [conflict,  setConflict]  = useState<CustomerConflict | null>(null)
+
+  // Top-level customers only can be selected as parent (no infinite nesting)
+  const parentOptions = customers.filter(c => !c.parent_customer_id && c.id !== customer?.id)
+
+  // Whether this is being created/edited as a quinta (sub-customer)
+  const isQuinta = !!parentCustomerId
+
+  async function submit(force = false) {
     if (!name.trim()) { setError('El nombre es obligatorio'); return }
     setSaving(true)
     setError(null)
+    setConflict(null)
     try {
       if (isEdit && customer) {
         const payload: PatchCustomerPayload = {
-          name:             name.trim(),
-          contact_name:     contactName.trim() || null,
-          email:            email.trim() || null,
-          phone:            phone.trim() || null,
-          tax_id_type:      (taxIdType as PatchCustomerPayload['tax_id_type']) || null,
-          tax_id:           taxId.trim() || null,
-          fiscal_condition: fiscalCondition.trim() || null,
+          name:               name.trim(),
+          parent_customer_id: parentCustomerId || null,
+          contact_name:       contactName.trim() || null,
+          email:              email.trim() || null,
+          phone:              phone.trim() || null,
+          tax_id_type:        (taxIdType as PatchCustomerPayload['tax_id_type']) || null,
+          tax_id:             taxId.trim() || null,
+          fiscal_condition:   fiscalCondition || null,
+          delivery_address:   deliveryAddress.trim() || null,
         }
         await updateCustomer(customer.id, payload)
       } else {
         await createCustomer({
-          name:             name.trim(),
-          contact_name:     contactName.trim() || undefined,
-          email:            email.trim() || undefined,
-          phone:            phone.trim() || undefined,
-          tax_id_type:      (taxIdType as PatchCustomerPayload['tax_id_type']) || undefined,
-          tax_id:           taxId.trim() || undefined,
-          fiscal_condition: fiscalCondition.trim() || undefined,
+          name:               name.trim(),
+          parent_customer_id: parentCustomerId || undefined,
+          contact_name:       contactName.trim() || undefined,
+          email:              email.trim() || undefined,
+          phone:              phone.trim() || undefined,
+          tax_id_type:        (taxIdType as PatchCustomerPayload['tax_id_type']) || undefined,
+          tax_id:             taxId.trim() || undefined,
+          fiscal_condition:   fiscalCondition || undefined,
+          delivery_address:   deliveryAddress.trim() || undefined,
+          force,
         })
       }
       onSaved()
-    } catch {
+    } catch (err: unknown) {
+      // Handle duplicate detection (409)
+      if (err && typeof err === 'object' && 'conflict' in err) {
+        setConflict((err as { conflict: CustomerConflict }).conflict)
+        setSaving(false)
+        return
+      }
       setError('No se pudo guardar el cliente')
       setSaving(false)
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    void submit(false)
   }
 
   return (
@@ -356,7 +443,7 @@ function CustomerFormModal({ customer, onClose, onSaved }: {
     }} onClick={onClose}>
       <div style={{
         background: 'var(--p-surface)', borderRadius: 12, padding: 24,
-        width: '100%', maxWidth: 480, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+        width: '100%', maxWidth: 500, boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
         maxHeight: '90vh', overflowY: 'auto',
       }} onClick={e => e.stopPropagation()}>
         <h3 style={{ margin: '0 0 20px', fontSize: 16, fontWeight: 700 }}>
@@ -364,16 +451,37 @@ function CustomerFormModal({ customer, onClose, onSaved }: {
         </h3>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+          {/* Parent selector — links this entry as a "quinta" of a producer */}
+          {!isEdit && parentOptions.length > 0 && (
+            <label style={labelStyle}>
+              Asociar a productor (opcional)
+              <select value={parentCustomerId} onChange={e => setParentCustomerId(e.target.value)} style={inputStyle}>
+                <option value="">— Cliente independiente —</option>
+                {parentOptions.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              {isQuinta && (
+                <span style={{ fontSize: 11, color: 'var(--p-text-muted)', marginTop: 2 }}>
+                  Esta entrada se creará como quinta/destino de entrega del productor seleccionado.
+                </span>
+              )}
+            </label>
+          )}
+
           <label style={labelStyle}>
-            Nombre / Razón social *
+            {isQuinta ? 'Nombre del campo / quinta *' : 'Nombre / Razón social *'}
             <input value={name} onChange={e => setName(e.target.value)}
-              style={inputStyle} autoFocus placeholder="Ej: Juan García / Agro S.A." />
+              style={inputStyle} autoFocus
+              placeholder={isQuinta ? 'Ej: Quinta La Esperanza' : 'Ej: Juan García / Agro S.A.'} />
           </label>
 
           <label style={labelStyle}>
-            Contacto (persona)
+            {isQuinta ? 'Encargado' : 'Contacto (persona)'}
             <input value={contactName} onChange={e => setContactName(e.target.value)}
-              style={inputStyle} placeholder="Nombre del contacto en la empresa" />
+              style={inputStyle}
+              placeholder={isQuinta ? 'Nombre del encargado de campo' : 'Nombre del contacto en la empresa'} />
           </label>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -389,28 +497,53 @@ function CustomerFormModal({ customer, onClose, onSaved }: {
             </label>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <label style={labelStyle}>
-              Tipo doc.
-              <select value={taxIdType} onChange={e => setTaxIdType(e.target.value)} style={inputStyle}>
-                <option value="">Sin documento</option>
-                {Object.entries(TAX_ID_TYPE_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-            </label>
-            <label style={labelStyle}>
-              Número
-              <input value={taxId} onChange={e => setTaxId(e.target.value)}
-                style={inputStyle} placeholder="Ej: 20-12345678-9" />
-            </label>
-          </div>
+          {/* Tax data — only relevant for top-level (billing) customers */}
+          {!isQuinta && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <label style={labelStyle}>
+                  Tipo doc.
+                  <select value={taxIdType} onChange={e => setTaxIdType(e.target.value)} style={inputStyle}>
+                    <option value="">Sin documento</option>
+                    {Object.entries(TAX_ID_TYPE_LABELS).map(([v, l]) => (
+                      <option key={v} value={v}>{l}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  Número
+                  <input value={taxId} onChange={e => setTaxId(e.target.value)}
+                    style={inputStyle} placeholder="Ej: 20-12345678-9" />
+                </label>
+              </div>
 
+              <label style={labelStyle}>
+                Condición fiscal
+                <select value={fiscalCondition} onChange={e => setFiscalCondition(e.target.value)} style={inputStyle}>
+                  <option value="">— Sin especificar —</option>
+                  {FISCAL_CONDITIONS.map(fc => (
+                    <option key={fc} value={fc}>{fc}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+
+          {/* Delivery address — always relevant */}
           <label style={labelStyle}>
-            Condición fiscal
-            <input value={fiscalCondition} onChange={e => setFiscalCondition(e.target.value)}
-              style={inputStyle} placeholder="Ej: Responsable Inscripto" />
+            Dirección de entrega
+            <input value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)}
+              style={inputStyle} placeholder="Ej: Ruta 7 km 42, Luján" />
           </label>
+
+          {/* Duplicate warning — replaces the standard error when 409 */}
+          {conflict && (
+            <DuplicateWarning
+              conflict={conflict}
+              onForce={() => { void submit(true) }}
+              onCancel={() => setConflict(null)}
+            />
+          )}
 
           {error && (
             <div style={{ fontSize: 13, color: '#b91c1c', background: '#fef2f2', padding: '8px 12px', borderRadius: 6 }}>
@@ -443,11 +576,17 @@ function CustomersTab() {
     queryFn:  getCustomers,
   })
 
-  const filtered = customers.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.phone ?? '').includes(search) ||
-    (c.tax_id ?? '').includes(search),
-  )
+  // Search across producers and their quintas
+  const filtered = customers.filter(c => {
+    const term = search.toLowerCase()
+    const matchSelf = c.name.toLowerCase().includes(term) ||
+      (c.phone ?? '').includes(term) ||
+      (c.tax_id ?? '').includes(term)
+    const matchChild = (c.locations ?? []).some(l =>
+      l.name.toLowerCase().includes(term) || (l.phone ?? '').includes(term),
+    )
+    return matchSelf || matchChild
+  })
 
   function openEdit(c: NurseryCustomer) { setEditing(c); setShowForm(true) }
   function openCreate()                 { setEditing(undefined); setShowForm(true) }
@@ -485,44 +624,74 @@ function CustomersTab() {
         </div>
       )}
 
-      {/* Customer list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Customer list — producers with their quintas nested */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {filtered.map(c => (
           <div key={c.id} style={{
             background: 'var(--p-surface)', border: '1px solid var(--p-border)',
-            borderRadius: 10, padding: '12px 16px',
-            display: 'flex', alignItems: 'center', gap: 12,
+            borderRadius: 10, overflow: 'hidden',
           }}>
-            {/* Avatar letter */}
+            {/* Producer row */}
             <div style={{
-              width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-              background: 'var(--p-primary)', color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16, fontWeight: 700,
+              padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
             }}>
-              {c.name.charAt(0).toUpperCase()}
-            </div>
-
-            {/* Info */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--p-text)' }}>{c.name}</div>
-              <div style={{ fontSize: 12, color: 'var(--p-text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 2 }}>
-                {c.contact_name && <span>{c.contact_name}</span>}
-                {c.phone        && <span>{c.phone}</span>}
-                {c.email        && <span>{c.email}</span>}
-                {c.tax_id       && <span>{TAX_ID_TYPE_LABELS[c.tax_id_type ?? ''] ?? c.tax_id_type}: {c.tax_id}</span>}
-                {c.fiscal_condition && <span>{c.fiscal_condition}</span>}
+              {/* Avatar */}
+              <div style={{
+                width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                background: 'var(--p-primary)', color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 15, fontWeight: 700,
+              }}>
+                {c.name.charAt(0).toUpperCase()}
               </div>
+
+              {/* Info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--p-text)' }}>{c.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--p-text-muted)', display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 2 }}>
+                  {c.contact_name    && <span>{c.contact_name}</span>}
+                  {c.phone           && <span>{c.phone}</span>}
+                  {c.fiscal_condition && <span style={{ fontStyle: 'italic' }}>{c.fiscal_condition}</span>}
+                  {c.tax_id          && <span>{TAX_ID_TYPE_LABELS[c.tax_id_type ?? ''] ?? c.tax_id_type}: {c.tax_id}</span>}
+                  {(c.locations?.length ?? 0) > 0 && (
+                    <span style={{ color: 'var(--p-primary)', fontWeight: 600 }}>
+                      {c.locations!.length} {c.locations!.length === 1 ? 'quinta' : 'quintas'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <button onClick={() => openEdit(c)} style={{
+                flexShrink: 0, fontSize: 13, padding: '5px 12px', borderRadius: 7,
+                border: '1px solid var(--p-border)', background: 'var(--p-bg)',
+                color: 'var(--p-text-secondary)', cursor: 'pointer',
+              }}>
+                Editar
+              </button>
             </div>
 
-            {/* Edit button */}
-            <button onClick={() => openEdit(c)} style={{
-              flexShrink: 0, fontSize: 13, padding: '5px 12px', borderRadius: 7,
-              border: '1px solid var(--p-border)', background: 'var(--p-bg)',
-              color: 'var(--p-text-secondary)', cursor: 'pointer',
-            }}>
-              Editar
-            </button>
+            {/* Quintas (child locations) */}
+            {(c.locations?.length ?? 0) > 0 && (
+              <div style={{ borderTop: '1px solid var(--p-border)', background: 'var(--p-bg)' }}>
+                {c.locations!.map(loc => (
+                  <div key={loc.id} style={{
+                    padding: '8px 16px 8px 64px',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    borderBottom: '1px solid var(--p-border)',
+                  }}>
+                    <span style={{ fontSize: 13, color: 'var(--p-text-muted)', marginRight: 2 }}>↳</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--p-text)' }}>{loc.name}</span>
+                      <span style={{ fontSize: 12, color: 'var(--p-text-muted)', marginLeft: 10 }}>
+                        {loc.contact_name && `${loc.contact_name} · `}
+                        {loc.phone ?? ''}
+                        {loc.delivery_address && ` · ${loc.delivery_address}`}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -530,6 +699,7 @@ function CustomersTab() {
       {showForm && (
         <CustomerFormModal
           customer={editing}
+          customers={customers}
           onClose={() => setShowForm(false)}
           onSaved={onSaved}
         />
