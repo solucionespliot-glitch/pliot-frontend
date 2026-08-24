@@ -34,9 +34,27 @@ export interface UpdateTurnData {
 export interface Controller {
   id: string
   device_name: string
+  device_type: string
+  site_id: string
   sync_status: 'synced' | 'pending' | 'error'
   override_mode: 'none' | 'temporary_24h' | 'temporary_48h' | 'permanent'
   last_seen_at: string | null
+  context: Record<string, unknown> | null
+}
+
+export interface InfluenceNode {
+  id: string
+  device_id: string
+}
+
+export interface Actuator {
+  id: string
+  label: string
+  relay_index: number
+  enabled: boolean
+  behavior_type: string
+  behavior_config: Record<string, unknown>
+  influence_nodes: InfluenceNode[]
 }
 
 export interface Fogger {
@@ -93,4 +111,19 @@ export async function getFoggers(): Promise<Fogger[]> {
 export async function getFoggerPresets(): Promise<FoggerPreset[]> {
   const { data } = await api.get<FoggerPreset[]>('/dashboard/foggers/presets')
   return data
+}
+
+export async function getControllerActuators(controllerId: string): Promise<Actuator[]> {
+  const { data } = await api.get<{ actuators: Actuator[] }>(`/dashboard/controllers/${controllerId}/actuators`)
+  return data.actuators
+}
+
+// Replaces the full set of influence nodes for one actuator.
+// Pass an empty array to remove all nodes.
+export async function updateActuatorNodes(
+  controllerId: string,
+  actuatorId: string,
+  nodeIds: string[],
+): Promise<void> {
+  await api.put(`/dashboard/controllers/${controllerId}/actuators/${actuatorId}/nodes`, { node_ids: nodeIds })
 }
