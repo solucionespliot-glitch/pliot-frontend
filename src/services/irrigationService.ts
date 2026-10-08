@@ -47,13 +47,54 @@ export interface InfluenceNode {
   device_id: string
 }
 
+export type BehaviorType = 'vpd' | 'schedule' | 'irrigation' | 'temperature' | 'manual'
+
+export interface VpdConfig {
+  vpd_threshold:        number
+  on_duration_seconds:  number
+  off_duration_seconds: number
+  vpd_logic:            'any' | 'all' | 'average'
+  hysteresis:           number
+  stale_timeout_minutes: number
+}
+
+export interface ScheduleWindow {
+  on_time:  string  // 'HH:MM'
+  off_time: string  // 'HH:MM'
+}
+
+export interface ScheduleConfig {
+  days:    number[]        // 1=Mon … 7=Sun (ISO)
+  windows: ScheduleWindow[]
+}
+
+export interface IrrigationEvent {
+  time:               string  // 'HH:MM'
+  duration_minutes:   number
+}
+
+export interface IrrigationConfig {
+  days:   number[]
+  events: IrrigationEvent[]
+}
+
+export interface TemperatureConfig {
+  mode:                  'heat' | 'cool'
+  min_temp:              number
+  max_temp:              number
+  hysteresis:            number
+  stale_timeout_minutes: number
+}
+
+export type BehaviorConfig = VpdConfig | ScheduleConfig | IrrigationConfig | TemperatureConfig | Record<string, never>
+
 export interface Actuator {
   id: string
   label: string
   relay_index: number
   enabled: boolean
-  behavior_type: string
-  behavior_config: Record<string, unknown>
+  behavior_type: BehaviorType
+  behavior_config: BehaviorConfig
   influence_nodes: InfluenceNode[]
 }
 
@@ -126,4 +167,21 @@ export async function updateActuatorNodes(
   nodeIds: string[],
 ): Promise<void> {
   await api.put(`/dashboard/controllers/${controllerId}/actuators/${actuatorId}/nodes`, { node_ids: nodeIds })
+}
+
+// Replaces behavior_type and behavior_config for one actuator.
+export async function updateActuator(
+  controllerId: string,
+  actuatorId: string,
+  payload: { behavior_type: BehaviorType; behavior_config: BehaviorConfig },
+): Promise<void> {
+  await api.put(`/dashboard/controllers/${controllerId}/actuators/${actuatorId}`, payload)
+}
+
+// Issues a command to a controller (e.g. pulseRelay).
+export async function sendCommand(
+  controllerId: string,
+  payload: { command_type: 'pulseRelay'; relay_index: number; duration_minutes: number },
+): Promise<void> {
+  await api.post(`/dashboard/controllers/${controllerId}/commands`, payload)
 }

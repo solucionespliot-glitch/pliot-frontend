@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query'
 import {
   getControllers,
@@ -6,11 +6,19 @@ import {
   updateControllerOverride,
   getControllerActuators,
   updateActuatorNodes,
+  updateActuator,
+  sendCommand,
   type Controller,
   type Fogger,
   type Actuator,
+  type BehaviorType,
+  type BehaviorConfig,
+  type VpdConfig,
+  type ScheduleConfig,
+  type IrrigationConfig,
+  type TemperatureConfig,
 } from '../../services/irrigationService'
-import { getSiteDevices } from '../../services/devicesService'
+import { getSiteDevices, type Device } from '../../services/devicesService'
 import { fetchMe } from '../../services/api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -54,6 +62,488 @@ function formatHeartbeat(ts: string | null): string {
   return `${Math.floor(diffMin / 60)}h atrás`
 }
 
+// ── Behavior type helpers ─────────────────────────────────────────────────────
+
+const BEHAVIOR_LABELS: Record<BehaviorType, string> = {
+  vpd:         'VPD',
+  schedule:    'Horario',
+  irrigation:  'Riego',
+  temperature: 'Temperatura',
+  manual:      'Manual',
+}
+
+const BEHAVIOR_COLORS: Record<BehaviorType, { bg: string; text: string }> = {
+  vpd:         { bg: '#dbeafe', text: '#1e40af' },
+  schedule:    { bg: '#d1fae5', text: '#065f46' },
+  irrigation:  { bg: '#ede9fe', text: '#4c1d95' },
+  temperature: { bg: '#fee2e2', text: '#991b1b' },
+  manual:      { bg: '#f3f4f6', text: '#6b7280' },
+}
+
+function BehaviorBadge({ type }: { type: BehaviorType }) {
+  const { bg, text } = BEHAVIOR_COLORS[type] ?? BEHAVIOR_COLORS.manual
+  return (
+    <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700, background: bg, color: text }}>
+      {BEHAVIOR_LABELS[type] ?? type}
+    </span>
+  )
+}
+
+// Returns a sensible default config for a given behavior type.
+function defaultConfig(type: BehaviorType): BehaviorConfig {
+  switch (type) {
+    case 'vpd':         return { vpd_threshold: 1.2, on_duration_seconds: 30, off_duration_seconds: 120, vpd_logic: 'any', hysteresis: 0.1, stale_timeout_minutes: 15 } as VpdConfig
+    case 'schedule':    return { days: [1,2,3,4,5,6,7], windows: [{ on_time: '08:00', off_time: '20:00' }] } as ScheduleConfig
+    case 'irrigation':  return { days: [1,2,3,4,5,6,7], events: [{ time: '08:00', duration_minutes: 5 }] } as IrrigationConfig
+    case 'temperature': return { mode: 'cool', min_temp: 20, max_temp: 30, hysteresis: 0.5, stale_timeout_minutes: 15 } as TemperatureConfig
+    default:            return {}
+  }
+}
+
+const DAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+const ALL_DAYS   = [1, 2, 3, 4, 5, 6, 7]
+
+// Shared input style
+const inputStyle: React.CSSProperties = {
+  padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 4,
+  fontSize: 13, color: '#111827', background: '#fff',
+}
+
+// ── Days picker ───────────────────────────────────────────────────────────────
+
+function DaysPicker({ days, onChange }: { days: number[]; onChange: (d: number[]) => void }) {
+  function toggle(day: number) {
+    onChange(days.includes(day) ? days.filter(d => d !== day) : [...days, day].sort())
+  }
+  return (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      {ALL_DAYS.map((d, i) => (
+        <button
+          key={d}
+          type="button"
+          onClick={() => toggle(d)}
+          style={{
+            padding: '3px 8px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 12,
+            fontWeight: 600, cursor: 'pointer',
+            background: days.includes(d) ? '#2563eb' : '#fff',
+            color:      days.includes(d) ? '#fff'    : '#374151',
+          }}
+        >
+          {DAY_LABELS[i]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Per-type config forms ─────────────────────────────────────────────────────
+
+function VpdForm({ config, onChange }: { config: VpdConfig; onChange: (c: VpdConfig) => void }) {
+  function set<K extends keyof VpdConfig>(k: K, v: VpdConfig[K]) { onChange({ ...config, [k]: v }) }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+        <label style={{ fontSize: 12, color: '#6b7280' }}>
+          Umbral VPD (kPa)
+          <br />
+          <input type="number" step="0.1" min="0" max="5" value={config.vpd_threshold}
+            onChange={e => set('vpd_threshold', parseFloat(e.target.value))}
+            style={{ ...inputStyle, width: 80 }} />
+        </label>
+        <label style={{ fontSize: 12, color: '#6b7280' }}>
+          Histéresis (kPa)
+          <br />
+          <input type="number" step="0.05" min="0" max="2" value={config.hysteresis}
+            onChange={e => set('hysteresis', parseFloat(e.target.value))}
+            style={{ ...inputStyle, width: 70 }} />
+        </label>
+        <label style={{ fontSize: 12, color: '#6b7280' }}>
+          ON (seg)
+          <br />
+          <input type="number" step="1" min="1" max="3600" value={config.on_duration_seconds}
+            onChange={e => set('on_duration_seconds', parseInt(e.target.value))}
+            style={{ ...inputStyle, width: 70 }} />
+        </label>
+        <label style={{ fontSize: 12, color: '#6b7280' }}>
+          OFF (seg)
+          <br />
+          <input type="number" step="1" min="1" max="3600" value={config.off_duration_seconds}
+            onChange={e => set('off_duration_seconds', parseInt(e.target.value))}
+            style={{ ...inputStyle, width: 70 }} />
+        </label>
+        <label style={{ fontSize: 12, color: '#6b7280' }}>
+          Sin datos (min)
+          <br />
+          <input type="number" step="1" min="1" max="60" value={config.stale_timeout_minutes}
+            onChange={e => set('stale_timeout_minutes', parseInt(e.target.value))}
+            style={{ ...inputStyle, width: 60 }} />
+        </label>
+        <label style={{ fontSize: 12, color: '#6b7280' }}>
+          Lógica nodos
+          <br />
+          <select value={config.vpd_logic} onChange={e => set('vpd_logic', e.target.value as VpdConfig['vpd_logic'])}
+            style={{ ...inputStyle }}>
+            <option value="any">Cualquiera (MAX)</option>
+            <option value="all">Todos (MIN)</option>
+            <option value="average">Promedio</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  )
+}
+
+function ScheduleForm({ config, onChange }: { config: ScheduleConfig; onChange: (c: ScheduleConfig) => void }) {
+  function setDays(days: number[]) { onChange({ ...config, days }) }
+  function setWindow(i: number, key: 'on_time' | 'off_time', v: string) {
+    const windows = config.windows.map((w, idx) => idx === i ? { ...w, [key]: v } : w)
+    onChange({ ...config, windows })
+  }
+  function addWindow() { onChange({ ...config, windows: [...config.windows, { on_time: '08:00', off_time: '20:00' }] }) }
+  function removeWindow(i: number) { onChange({ ...config, windows: config.windows.filter((_, idx) => idx !== i) }) }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Días activos</div>
+        <DaysPicker days={config.days} onChange={setDays} />
+      </div>
+      <div>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Ventanas horarias</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {config.windows.map((w, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="time" value={w.on_time}  onChange={e => setWindow(i, 'on_time',  e.target.value)} style={{ ...inputStyle }} />
+              <span style={{ fontSize: 12, color: '#9ca3af' }}>→</span>
+              <input type="time" value={w.off_time} onChange={e => setWindow(i, 'off_time', e.target.value)} style={{ ...inputStyle }} />
+              {config.windows.length > 1 && (
+                <button type="button" onClick={() => removeWindow(i)}
+                  style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+              )}
+            </div>
+          ))}
+          {config.windows.length < 10 && (
+            <button type="button" onClick={addWindow}
+              style={{ alignSelf: 'flex-start', marginTop: 2, fontSize: 12, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              + Agregar ventana
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function IrrigationForm({ config, onChange }: { config: IrrigationConfig; onChange: (c: IrrigationConfig) => void }) {
+  function setDays(days: number[]) { onChange({ ...config, days }) }
+  function setEvent(i: number, key: keyof IrrigationConfig['events'][0], v: string | number) {
+    const events = config.events.map((ev, idx) => idx === i ? { ...ev, [key]: v } : ev)
+    onChange({ ...config, events })
+  }
+  function addEvent() { onChange({ ...config, events: [...config.events, { time: '08:00', duration_minutes: 5 }] }) }
+  function removeEvent(i: number) { onChange({ ...config, events: config.events.filter((_, idx) => idx !== i) }) }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Días activos</div>
+        <DaysPicker days={config.days} onChange={setDays} />
+      </div>
+      <div>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Eventos de riego</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {config.events.map((ev, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="time" value={ev.time}
+                onChange={e => setEvent(i, 'time', e.target.value)} style={{ ...inputStyle }} />
+              <input type="number" min="1" max="1440" value={ev.duration_minutes}
+                onChange={e => setEvent(i, 'duration_minutes', parseInt(e.target.value))}
+                style={{ ...inputStyle, width: 60 }} />
+              <span style={{ fontSize: 12, color: '#9ca3af' }}>min</span>
+              {config.events.length > 1 && (
+                <button type="button" onClick={() => removeEvent(i)}
+                  style={{ fontSize: 12, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+              )}
+            </div>
+          ))}
+          {config.events.length < 20 && (
+            <button type="button" onClick={addEvent}
+              style={{ alignSelf: 'flex-start', marginTop: 2, fontSize: 12, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              + Agregar evento
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TemperatureForm({ config, onChange }: { config: TemperatureConfig; onChange: (c: TemperatureConfig) => void }) {
+  function set<K extends keyof TemperatureConfig>(k: K, v: TemperatureConfig[K]) { onChange({ ...config, [k]: v }) }
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+      <label style={{ fontSize: 12, color: '#6b7280' }}>
+        Modo
+        <br />
+        <select value={config.mode} onChange={e => set('mode', e.target.value as 'heat' | 'cool')} style={{ ...inputStyle }}>
+          <option value="cool">Enfriar</option>
+          <option value="heat">Calentar</option>
+        </select>
+      </label>
+      <label style={{ fontSize: 12, color: '#6b7280' }}>
+        Temp. mín (°C)
+        <br />
+        <input type="number" step="0.5" min="-20" max="60" value={config.min_temp}
+          onChange={e => set('min_temp', parseFloat(e.target.value))}
+          style={{ ...inputStyle, width: 70 }} />
+      </label>
+      <label style={{ fontSize: 12, color: '#6b7280' }}>
+        Temp. máx (°C)
+        <br />
+        <input type="number" step="0.5" min="-20" max="60" value={config.max_temp}
+          onChange={e => set('max_temp', parseFloat(e.target.value))}
+          style={{ ...inputStyle, width: 70 }} />
+      </label>
+      <label style={{ fontSize: 12, color: '#6b7280' }}>
+        Histéresis (°C)
+        <br />
+        <input type="number" step="0.5" min="0" max="10" value={config.hysteresis}
+          onChange={e => set('hysteresis', parseFloat(e.target.value))}
+          style={{ ...inputStyle, width: 70 }} />
+      </label>
+      <label style={{ fontSize: 12, color: '#6b7280' }}>
+        Sin datos (min)
+        <br />
+        <input type="number" step="1" min="1" max="60" value={config.stale_timeout_minutes}
+          onChange={e => set('stale_timeout_minutes', parseInt(e.target.value))}
+          style={{ ...inputStyle, width: 60 }} />
+      </label>
+    </div>
+  )
+}
+
+// ── ActuatorEditRow ───────────────────────────────────────────────────────────
+// Renders one actuator: compact header with type badge, expand for edit form,
+// separate expand for manual pulse.
+
+function ActuatorEditRow({ controllerId, actuator, sensorDevices, canEdit }: {
+  controllerId: string
+  actuator: Actuator
+  sensorDevices: Device[]
+  canEdit: boolean
+}) {
+  const queryClient = useQueryClient()
+  const [editOpen,  setEditOpen]  = useState(false)
+  const [pulseOpen, setPulseOpen] = useState(false)
+
+  // Edit form state — initialized on open from current actuator values
+  const [behaviorType, setBehaviorType] = useState<BehaviorType>(actuator.behavior_type)
+  const [config, setConfig] = useState<BehaviorConfig>(actuator.behavior_config)
+  const [nodeId, setNodeId] = useState(actuator.influence_nodes[0]?.id ?? '')
+
+  const [saving,     setSaving]     = useState(false)
+  const [saveError,  setSaveError]  = useState<string | null>(null)
+
+  // Pulse form state
+  const [pulseMins,    setPulseMins]    = useState(5)
+  const [pulseSending, setPulseSending] = useState(false)
+  const [pulseError,   setPulseError]   = useState<string | null>(null)
+  const [pulseDone,    setPulseDone]    = useState(false)
+
+  function openEdit() {
+    setBehaviorType(actuator.behavior_type)
+    setConfig(actuator.behavior_config)
+    setNodeId(actuator.influence_nodes[0]?.id ?? '')
+    setSaveError(null)
+    setEditOpen(true)
+    setPulseOpen(false)
+  }
+
+  function handleTypeChange(type: BehaviorType) {
+    setBehaviorType(type)
+    setConfig(defaultConfig(type))
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await updateActuator(controllerId, actuator.id, { behavior_type: behaviorType, behavior_config: config })
+      // Node assignment: only relevant for sensor-driven types, but we save it for all
+      await updateActuatorNodes(controllerId, actuator.id, nodeId ? [nodeId] : [])
+      await queryClient.invalidateQueries({ queryKey: ['controller-actuators', controllerId] })
+      setEditOpen(false)
+    } catch {
+      setSaveError('Error al guardar. Intentá de nuevo.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handlePulse() {
+    setPulseSending(true)
+    setPulseError(null)
+    setPulseDone(false)
+    try {
+      await sendCommand(controllerId, {
+        command_type: 'pulseRelay',
+        relay_index: actuator.relay_index,
+        duration_minutes: pulseMins,
+      })
+      setPulseDone(true)
+      setTimeout(() => { setPulseDone(false); setPulseOpen(false) }, 2500)
+    } catch {
+      setPulseError('Error al enviar comando.')
+    } finally {
+      setPulseSending(false)
+    }
+  }
+
+  const label = actuator.label || `Re${actuator.relay_index + 1}`
+  const needsNode = behaviorType === 'vpd' || behaviorType === 'temperature'
+
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden', background: '#fff' }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
+        <span style={{ fontWeight: 700, fontSize: 13, color: '#111827', minWidth: 50 }}>{label}</span>
+        <BehaviorBadge type={actuator.behavior_type} />
+        <span style={{ fontSize: 12, color: '#9ca3af', flex: 1 }}>
+          {actuator.influence_nodes[0]?.device_id ?? ''}
+        </span>
+        {canEdit && (
+          <>
+            <button
+              type="button"
+              onClick={() => editOpen ? setEditOpen(false) : openEdit()}
+              style={{
+                padding: '4px 10px', borderRadius: 4, border: '1px solid #d1d5db', cursor: 'pointer',
+                fontSize: 12, fontWeight: 600,
+                background: editOpen ? '#eff6ff' : '#fff',
+                color:      editOpen ? '#2563eb' : '#374151',
+              }}
+            >
+              {editOpen ? '✕ Cerrar' : 'Editar'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPulseOpen(p => !p); setPulseError(null); setPulseDone(false); setEditOpen(false) }}
+              style={{
+                padding: '4px 10px', borderRadius: 4, border: '1px solid #d1d5db', cursor: 'pointer',
+                fontSize: 12, fontWeight: 600,
+                background: pulseOpen ? '#fffbeb' : '#fff',
+                color: '#374151',
+              }}
+            >
+              Pulso
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Edit form */}
+      {editOpen && (
+        <div style={{ borderTop: '1px solid #e5e7eb', padding: '14px 16px', background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Behavior type selector */}
+          <div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Tipo de comportamiento</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {(['vpd', 'schedule', 'irrigation', 'temperature', 'manual'] as BehaviorType[]).map(t => (
+                <button key={t} type="button" onClick={() => handleTypeChange(t)}
+                  style={{
+                    padding: '4px 12px', borderRadius: 4, cursor: 'pointer',
+                    border: behaviorType === t ? '2px solid #2563eb' : '1px solid #d1d5db',
+                    background: behaviorType === t ? '#eff6ff' : '#fff',
+                    color: behaviorType === t ? '#2563eb' : '#374151',
+                    fontSize: 12, fontWeight: 600,
+                  }}
+                >
+                  {BEHAVIOR_LABELS[t]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Per-type config form */}
+          {behaviorType === 'vpd' && (
+            <VpdForm config={config as VpdConfig} onChange={setConfig} />
+          )}
+          {behaviorType === 'schedule' && (
+            <ScheduleForm config={config as ScheduleConfig} onChange={setConfig} />
+          )}
+          {behaviorType === 'irrigation' && (
+            <IrrigationForm config={config as IrrigationConfig} onChange={setConfig} />
+          )}
+          {behaviorType === 'temperature' && (
+            <TemperatureForm config={config as TemperatureConfig} onChange={setConfig} />
+          )}
+          {behaviorType === 'manual' && (
+            <div style={{ fontSize: 13, color: '#9ca3af' }}>Sin configuración — el relé se controla manualmente.</div>
+          )}
+
+          {/* Node selector — only for sensor-driven types */}
+          {needsNode && (
+            <div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Nodo sensor</div>
+              <select value={nodeId} onChange={e => setNodeId(e.target.value)} style={{ ...inputStyle, minWidth: 200 }}>
+                <option value="">— Sin nodo —</option>
+                {sensorDevices.map(d => (
+                  <option key={d.id} value={d.id}>{d.display_name || d.device_id}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {saveError && (
+            <div style={{ fontSize: 12, color: '#991b1b', background: '#fee2e2', padding: '6px 10px', borderRadius: 4 }}>
+              {saveError}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              alignSelf: 'flex-start', padding: '6px 18px', borderRadius: 4, border: 'none',
+              background: saving ? '#e5e7eb' : '#2563eb',
+              color: saving ? '#9ca3af' : '#fff',
+              fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer',
+            }}
+          >
+            {saving ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      )}
+
+      {/* Pulse form */}
+      {pulseOpen && (
+        <div style={{ borderTop: '1px solid #e5e7eb', padding: '10px 16px', background: '#fffbeb', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: '#92400e', fontWeight: 600 }}>Pulso manual</span>
+          <input
+            type="number" min="1" max="120" value={pulseMins}
+            onChange={e => setPulseMins(parseInt(e.target.value))}
+            style={{ ...inputStyle, width: 55 }}
+          />
+          <span style={{ fontSize: 12, color: '#6b7280' }}>min</span>
+          <button
+            type="button"
+            onClick={handlePulse}
+            disabled={pulseSending || pulseDone}
+            style={{
+              padding: '5px 14px', borderRadius: 4, border: 'none',
+              background: pulseDone ? '#d1fae5' : pulseSending ? '#e5e7eb' : '#d97706',
+              color: pulseDone ? '#065f46' : pulseSending ? '#9ca3af' : '#fff',
+              fontSize: 12, fontWeight: 600, cursor: pulseSending ? 'default' : 'pointer',
+            }}
+          >
+            {pulseDone ? '✓ Enviado' : pulseSending ? 'Enviando…' : 'Activar'}
+          </button>
+          {pulseError && <span style={{ fontSize: 12, color: '#991b1b' }}>{pulseError}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const OVERRIDE_OPTIONS: { value: Controller['override_mode']; label: string }[] = [
   { value: 'none',           label: 'Ninguno'        },
   { value: 'temporary_24h', label: 'Temporal 24h'    },
@@ -61,16 +551,14 @@ const OVERRIDE_OPTIONS: { value: Controller['override_mode']; label: string }[] 
   { value: 'permanent',     label: 'Permanente'      },
 ]
 
-// ── Actuator panel — relay/node assignment ────────────────────────────────────
+// ── Actuator panel ────────────────────────────────────────────────────────────
 
 function ActuatorPanel({ controllerId, siteId, canEdit }: {
   controllerId: string
   siteId: string | null
   canEdit: boolean
 }) {
-  const queryClient = useQueryClient()
-
-  const { data: actuators, isLoading: loadingActuators } = useQuery({
+  const { data: actuators, isLoading } = useQuery({
     queryKey: ['controller-actuators', controllerId],
     queryFn: () => getControllerActuators(controllerId),
   })
@@ -81,46 +569,13 @@ function ActuatorPanel({ controllerId, siteId, canEdit }: {
     enabled: !!siteId,
   })
 
-  // Only offer sensors as selectable nodes (LoRa or WiFi)
-  const sensorDevices = (devices ?? []).filter(d =>
+  const sensorDevices = (devices ?? []).filter((d: Device) =>
     d.device_type === 'lora_sensor' || d.device_type === 'wifi_sensor'
   )
 
-  // Local selection per actuator id → sensor device UUID or ''
-  const [selections, setSelections] = useState<Record<string, string>>({})
-  const [saving, setSaving]         = useState<string | null>(null)
-  const [saveError, setSaveError]   = useState<string | null>(null)
-
-  // Initialize selections when actuator data loads
-  useEffect(() => {
-    if (!actuators) return
-    const init: Record<string, string> = {}
-    for (const a of actuators) {
-      init[a.id] = a.influence_nodes[0]?.id ?? ''
-    }
-    setSelections(init)
-  }, [actuators])
-
-  async function handleSave(actuator: Actuator) {
-    setSaving(actuator.id)
-    setSaveError(null)
-    try {
-      const nodeId = selections[actuator.id]
-      await updateActuatorNodes(controllerId, actuator.id, nodeId ? [nodeId] : [])
-      // Refresh actuator list so influence_nodes reflects the updated value
-      await queryClient.invalidateQueries({ queryKey: ['controller-actuators', controllerId] })
-    } catch {
-      setSaveError('Error al guardar. Intentá de nuevo.')
-    } finally {
-      setSaving(null)
-    }
-  }
-
-  if (loadingActuators) {
+  if (isLoading) {
     return (
-      <div style={{ padding: '12px 16px', fontSize: 13, color: '#6b7280' }}>
-        Cargando relés...
-      </div>
+      <div style={{ padding: '12px 16px', fontSize: 13, color: '#6b7280' }}>Cargando relés…</div>
     )
   }
 
@@ -129,64 +584,18 @@ function ActuatorPanel({ controllerId, siteId, canEdit }: {
   return (
     <div style={{ padding: '12px 20px 16px', background: '#f8fafc', borderTop: '1px solid #e5e7eb' }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 10 }}>
-        Relés y nodos de influencia
+        Relés
       </div>
-      {saveError && (
-        <div style={{ marginBottom: 8, padding: '6px 10px', background: '#fee2e2', color: '#991b1b', borderRadius: 4, fontSize: 12 }}>
-          {saveError}
-        </div>
-      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {rows.map(a => {
-          const label = a.label || `Re${a.relay_index + 1}`
-          const currentNodeId   = selections[a.id] ?? ''
-          const persistedNodeId = a.influence_nodes[0]?.id ?? ''
-          const changed         = currentNodeId !== persistedNodeId
-          return (
-            <div key={a.id} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              background: '#fff', border: '1px solid #e5e7eb',
-              borderRadius: 6, padding: '7px 12px',
-            }}>
-              <span style={{ fontWeight: 700, fontSize: 13, minWidth: 52, color: '#111827' }}>
-                {label}
-              </span>
-              {canEdit ? (
-                <>
-                  <select
-                    value={currentNodeId}
-                    onChange={e => setSelections(s => ({ ...s, [a.id]: e.target.value }))}
-                    style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: '1px solid #d1d5db', fontSize: 13, color: '#111827' }}
-                  >
-                    <option value="">— Sin nodo —</option>
-                    {sensorDevices.map(d => (
-                      <option key={d.id} value={d.id}>
-                        {d.display_name || d.device_id}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => handleSave(a)}
-                    disabled={!changed || saving === a.id}
-                    style={{
-                      padding: '5px 14px', borderRadius: 4, border: 'none',
-                      background: changed ? '#2563eb' : '#e5e7eb',
-                      color: changed ? '#fff' : '#9ca3af',
-                      cursor: changed && saving !== a.id ? 'pointer' : 'default',
-                      fontSize: 12, fontWeight: 600, flexShrink: 0,
-                    }}
-                  >
-                    {saving === a.id ? '…' : 'Guardar'}
-                  </button>
-                </>
-              ) : (
-                <span style={{ fontSize: 13, color: '#6b7280' }}>
-                  {a.influence_nodes[0]?.device_id ?? '—'}
-                </span>
-              )}
-            </div>
-          )
-        })}
+        {rows.map(a => (
+          <ActuatorEditRow
+            key={a.id}
+            controllerId={controllerId}
+            actuator={a}
+            sensorDevices={sensorDevices}
+            canEdit={canEdit}
+          />
+        ))}
         {rows.length === 0 && (
           <div style={{ fontSize: 13, color: '#9ca3af' }}>No hay actuadores configurados.</div>
         )}
