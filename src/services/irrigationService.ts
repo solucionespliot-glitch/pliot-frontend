@@ -34,9 +34,30 @@ export interface UpdateTurnData {
 export interface Controller {
   id: string
   device_name: string
+  site_id: string
   sync_status: 'synced' | 'pending' | 'error'
   override_mode: 'none' | 'temporary_24h' | 'temporary_48h' | 'permanent'
   last_seen_at: string | null
+  online: boolean
+  context: Record<string, unknown> | null
+}
+
+export type BehaviorType = 'vpd' | 'schedule' | 'irrigation' | 'temperature' | 'manual'
+
+export interface InfluenceNode {
+  id: string
+  device_id: string
+}
+
+export interface Actuator {
+  id: string
+  label: string
+  relay_index: number
+  enabled: boolean
+  behavior_type: BehaviorType
+  behavior_config: Record<string, unknown>
+  default_safe_state: string
+  influence_nodes: InfluenceNode[]
 }
 
 export interface Fogger {
@@ -96,4 +117,40 @@ export async function getFoggers(): Promise<Fogger[]> {
 export async function getFoggerPresets(): Promise<FoggerPreset[]> {
   const { data } = await api.get<{ presets: FoggerPreset[] }>('/dashboard/foggers/presets')
   return data.presets
+}
+
+export async function getControllerActuators(controllerId: string): Promise<Actuator[]> {
+  const { data } = await api.get<{ actuators: Actuator[] }>(`/dashboard/controllers/${controllerId}/actuators`)
+  return data.actuators
+}
+
+export async function updateActuatorBehavior(
+  controllerId: string,
+  actuatorId: string,
+  behavior_type: BehaviorType,
+  behavior_config: Record<string, unknown>,
+): Promise<Actuator> {
+  const { data } = await api.put<{ ok: boolean; actuator: Actuator }>(
+    `/dashboard/controllers/${controllerId}/actuators/${actuatorId}`,
+    { behavior_type, behavior_config },
+  )
+  return data.actuator
+}
+
+export async function updateActuatorNodes(
+  controllerId: string,
+  actuatorId: string,
+  node_ids: string[],
+): Promise<void> {
+  await api.put(
+    `/dashboard/controllers/${controllerId}/actuators/${actuatorId}/nodes`,
+    { node_ids },
+  )
+}
+
+export async function sendControllerCommand(
+  controllerId: string,
+  command: { command_type: 'pulseRelay'; relay_index: number; duration_minutes: number },
+): Promise<void> {
+  await api.post(`/dashboard/controllers/${controllerId}/commands`, command)
 }
