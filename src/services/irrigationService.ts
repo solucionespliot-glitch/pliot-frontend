@@ -148,6 +148,17 @@ export async function updateActuatorNodes(
   )
 }
 
+export async function patchActuatorLabel(
+  controllerId: string,
+  actuatorId: string,
+  label: string,
+): Promise<void> {
+  await api.patch(
+    `/dashboard/controllers/${controllerId}/actuators/${actuatorId}`,
+    { label },
+  )
+}
+
 export async function sendControllerCommand(
   controllerId: string,
   command: { command_type: 'pulseRelay'; relay_index: number; duration_minutes: number },

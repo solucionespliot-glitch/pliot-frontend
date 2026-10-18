@@ -166,26 +166,53 @@ function DeviceCard({ device, onClick, onRename }: {
         </div>
       </div>
 
-      {/* Telemetry grid — base sensors always shown */}
-      <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
-        <MetricCell icon="/icono-temp.png"     label="Temperatura" value={fmt1(device.temperature)}    unit="°C"   color="var(--p-temp)"  />
-        <MetricCell icon="/icono-hum.png"      label="Humedad"     value={fmt1(device.humidity)}       unit="%"    color="var(--p-hum)"   />
-        <MetricCell icon="/icono-luxLevel.png" label="Luz"         value={fmt1(device.light)}          unit=" lux" color="var(--p-light)" />
-        <MetricCell icon="/icono-dewpoint.png" label="DPV"         value={fmt2(device.vpd)}            unit=" kPa" color="var(--p-vpd)"   />
+      {/* Controller devices don't report telemetry — show a dedicated panel instead */}
+      {device.device_type === 'controller' ? (
+        <div style={{ padding: '16px 16px 12px' }}>
+          <div style={{ fontSize: 12, color: 'var(--p-text-muted)', marginBottom: 12 }}>
+            Controlador WiFi · 6 relés
+          </div>
+          <div style={{
+            background: '#f9fafb', borderRadius: 8, padding: '12px 14px',
+            fontSize: 13, color: '#6b7280', fontStyle: 'italic',
+            marginBottom: 12,
+          }}>
+            Las estadísticas de ciclos (horas ON por día, activaciones) se mostrarán aquí próximamente.
+          </div>
+          <a
+            href="/dashboard/controllers"
+            onClick={e => { e.stopPropagation() }}
+            style={{
+              display: 'inline-block',
+              fontSize: 13, fontWeight: 600,
+              color: 'var(--p-primary)', textDecoration: 'none',
+            }}
+          >
+            Ver relés y configuración →
+          </a>
+        </div>
+      ) : (
+        /* Telemetry grid — base sensors always shown */
+        <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
+          <MetricCell icon="/icono-temp.png"     label="Temperatura" value={fmt1(device.temperature)}    unit="°C"   color="var(--p-temp)"  />
+          <MetricCell icon="/icono-hum.png"      label="Humedad"     value={fmt1(device.humidity)}       unit="%"    color="var(--p-hum)"   />
+          <MetricCell icon="/icono-luxLevel.png" label="Luz"         value={fmt1(device.light)}          unit=" lux" color="var(--p-light)" />
+          <MetricCell icon="/icono-dewpoint.png" label="DPV"         value={fmt2(device.vpd)}            unit=" kPa" color="var(--p-vpd)"   />
 
-        {/* Optional sensors — only rendered if device has reported them at least once */}
-        {device.sensor_capabilities?.co2           && <MetricCell icon="/icono-co2.png"    label="CO₂"          value={fmt1(device.co2)}            unit=" ppm"        color="var(--p-co2)"  />}
-        {device.sensor_capabilities?.ppfd          && <MetricCell icon="/icono-luxLevel.png" label="PPFD"       value={fmt1(device.ppfd)}           unit=" µmol/m²·s"  color="var(--p-light)" />}
-        {device.sensor_capabilities?.ph            && <MetricCell icon="/icono-dewpoint.png" label="pH"         value={fmt2(device.ph)}             unit=""            color="var(--p-vpd)"  />}
-        {device.sensor_capabilities?.ec            && <MetricCell icon="/icono-dewpoint.png" label="EC"         value={fmt2(device.ec)}             unit=" mS/cm"      color="var(--p-vpd)"  />}
-        {device.sensor_capabilities?.soil_temperature && <MetricCell icon="/icono-temp.png" label="T° sustrato"   value={fmt1(device.soil_temperature)}   unit="°C"      color="var(--p-temp)" />}
-        {device.sensor_capabilities?.soil_moisture_cap && <MetricCell icon="/icono-hum.png"  label="Hum. suelo"    value={fmt1(device.soil_moisture_cap)}  unit="%"       color="#92400e" />}
-        {device.sensor_capabilities?.soil_temp_cap     && <MetricCell icon="/icono-temp.png" label="T° suelo"      value={fmt1(device.soil_temp_cap)}      unit="°C"      color="#a16207" />}
-        {device.sensor_capabilities?.rika_moisture     && <MetricCell icon="/icono-hum.png"  label="Hum. suelo R"  value={fmt1(device.rika_moisture)}      unit="%"       color="#92400e" />}
-        {device.sensor_capabilities?.rika_temperature  && <MetricCell icon="/icono-temp.png" label="T° suelo R"    value={fmt1(device.rika_temperature)}   unit="°C"      color="#a16207" />}
-        {device.sensor_capabilities?.rika_ec           && <MetricCell icon="/icono-dewpoint.png" label="EC suelo"  value={fmt2(device.rika_ec)}            unit=" mS/cm"  color="var(--p-vpd)" />}
-        {device.sensor_capabilities?.rika_ph           && <MetricCell icon="/icono-dewpoint.png" label="pH suelo"  value={fmt2(device.rika_ph)}            unit=""        color="var(--p-vpd)" />}
-      </div>
+          {/* Optional sensors — only rendered if device has reported them at least once */}
+          {device.sensor_capabilities?.co2           && <MetricCell icon="/icono-co2.png"    label="CO₂"          value={fmt1(device.co2)}            unit=" ppm"        color="var(--p-co2)"  />}
+          {device.sensor_capabilities?.ppfd          && <MetricCell icon="/icono-luxLevel.png" label="PPFD"       value={fmt1(device.ppfd)}           unit=" µmol/m²·s"  color="var(--p-light)" />}
+          {device.sensor_capabilities?.ph            && <MetricCell icon="/icono-dewpoint.png" label="pH"         value={fmt2(device.ph)}             unit=""            color="var(--p-vpd)"  />}
+          {device.sensor_capabilities?.ec            && <MetricCell icon="/icono-dewpoint.png" label="EC"         value={fmt2(device.ec)}             unit=" mS/cm"      color="var(--p-vpd)"  />}
+          {device.sensor_capabilities?.soil_temperature && <MetricCell icon="/icono-temp.png" label="T° sustrato"   value={fmt1(device.soil_temperature)}   unit="°C"      color="var(--p-temp)" />}
+          {device.sensor_capabilities?.soil_moisture_cap && <MetricCell icon="/icono-hum.png"  label="Hum. suelo"    value={fmt1(device.soil_moisture_cap)}  unit="%"       color="#92400e" />}
+          {device.sensor_capabilities?.soil_temp_cap     && <MetricCell icon="/icono-temp.png" label="T° suelo"      value={fmt1(device.soil_temp_cap)}      unit="°C"      color="#a16207" />}
+          {device.sensor_capabilities?.rika_moisture     && <MetricCell icon="/icono-hum.png"  label="Hum. suelo R"  value={fmt1(device.rika_moisture)}      unit="%"       color="#92400e" />}
+          {device.sensor_capabilities?.rika_temperature  && <MetricCell icon="/icono-temp.png" label="T° suelo R"    value={fmt1(device.rika_temperature)}   unit="°C"      color="#a16207" />}
+          {device.sensor_capabilities?.rika_ec           && <MetricCell icon="/icono-dewpoint.png" label="EC suelo"  value={fmt2(device.rika_ec)}            unit=" mS/cm"  color="var(--p-vpd)" />}
+          {device.sensor_capabilities?.rika_ph           && <MetricCell icon="/icono-dewpoint.png" label="pH suelo"  value={fmt2(device.rika_ph)}            unit=""        color="var(--p-vpd)" />}
+        </div>
+      )}
 
       {/* Footer */}
       <div style={{
@@ -193,9 +220,13 @@ function DeviceCard({ device, onClick, onRename }: {
         borderTop: '1px solid var(--p-border-light)',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       }}>
-        <span style={{ fontSize: 12, color: 'var(--p-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          🔋 {fmt2(device.battery_voltage)}{device.battery_voltage != null ? ' V' : ''}
-        </span>
+        {device.device_type !== 'controller' ? (
+          <span style={{ fontSize: 12, color: 'var(--p-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            🔋 {fmt2(device.battery_voltage)}{device.battery_voltage != null ? ' V' : ''}
+          </span>
+        ) : (
+          <span />
+        )}
         <span style={{ fontSize: 11, color: 'var(--p-text-muted)' }}>
           {formatLastSeen(device.last_seen_at)}
         </span>

@@ -5,11 +5,11 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { getOrganizations, impersonate } from '../services/settingsService'
 import { setImpersonateOrg, fetchMe } from '../services/api'
 
-const NAV_LINKS = [
-  { to: '/dashboard/devices',     label: 'Dispositivos'  },
-  { to: '/dashboard/irrigation',  label: 'Riego'         },
-  { to: '/dashboard/controllers', label: 'Controladores' },
-  { to: '/dashboard/settings',    label: 'Configuración' },
+const BASE_NAV_LINKS = [
+  { to: '/dashboard/devices',     label: 'Dispositivos',  feature: null         },
+  { to: '/dashboard/irrigation',  label: 'Riego',         feature: null         },
+  { to: '/dashboard/controllers', label: 'Controladores', feature: 'controllers' },
+  { to: '/dashboard/settings',    label: 'Configuración', feature: null         },
 ]
 
 const activeLinkStyle: React.CSSProperties = {
@@ -45,6 +45,11 @@ export default function NavBar() {
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const isSuperuser = me?.role === 'superuser'
+
+  // Filter nav links based on org feature flags. Superuser always sees all links.
+  const NAV_LINKS = BASE_NAV_LINKS.filter(
+    link => !link.feature || isSuperuser || me?.features?.[link.feature],
+  )
 
   const { data: orgs = [] } = useQuery({
     queryKey: ['organizations'],

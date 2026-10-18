@@ -18,6 +18,7 @@ export interface Me {
   auth0_sub: string
   organization_id: string
   role: string
+  features: Record<string, boolean>
 }
 
 export async function fetchMe(): Promise<Me> {
