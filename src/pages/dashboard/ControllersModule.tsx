@@ -560,10 +560,12 @@ function ActuatorCard({
   actuator,
   controllerId,
   siteDevices,
+  relayOn,
 }: {
   actuator: Actuator
   controllerId: string
   siteDevices: Device[]
+  relayOn: boolean | null
 }) {
   const queryClient = useQueryClient()
 
@@ -632,7 +634,13 @@ function ActuatorCard({
   )
 
   return (
-    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: 18, display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{
+      background: 'white',
+      border: `2px solid ${relayOn === true ? '#22c55e' : relayOn === false ? '#e5e7eb' : '#e5e7eb'}`,
+      borderRadius: 10, padding: 18, display: 'flex', flexDirection: 'column', gap: 18,
+      // Subtle green glow when relay is ON
+      boxShadow: relayOn === true ? '0 0 0 3px rgba(34,197,94,0.15)' : 'none',
+    }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ background: '#f3f4f6', borderRadius: 6, padding: '2px 10px', fontSize: 12, fontWeight: 700, color: '#374151', flexShrink: 0 }}>
@@ -656,7 +664,18 @@ function ActuatorCard({
             </svg>
           </button>
         )}
-        {!actuator.enabled && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 'auto' }}>deshabilitado</span>}
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {relayOn !== null && (
+            <span style={{
+              fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+              background: relayOn ? '#dcfce7' : '#f3f4f6',
+              color: relayOn ? '#16a34a' : '#9ca3af',
+            }}>
+              {relayOn ? 'ON' : 'OFF'}
+            </span>
+          )}
+          {!actuator.enabled && <span style={{ fontSize: 11, color: '#9ca3af' }}>deshabilitado</span>}
+        </span>
       </div>
 
       {/* Behavior type */}
@@ -739,6 +758,11 @@ function ActuatorCard({
 // ── ControllerActuatorsPanel ──────────────────────────────────────────────────
 
 function ControllerActuatorsPanel({ controller }: { controller: Controller }) {
+  // Extract relay states from last heartbeat context
+  const relayStates: boolean[] | null =
+    Array.isArray(controller.context?.last_relay_states)
+      ? (controller.context.last_relay_states as boolean[])
+      : null
   const { data: actuators, isLoading: loadingActuators, isError: errorActuators } = useQuery({
     queryKey: ['actuators', controller.id],
     queryFn: () => getControllerActuators(controller.id),
@@ -765,7 +789,13 @@ function ControllerActuatorsPanel({ controller }: { controller: Controller }) {
   return (
     <div style={{ paddingTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
       {actuators.map(a => (
-        <ActuatorCard key={a.id} actuator={a} controllerId={controller.id} siteDevices={siteDevices} />
+        <ActuatorCard
+          key={a.id}
+          actuator={a}
+          controllerId={controller.id}
+          siteDevices={siteDevices}
+          relayOn={relayStates ? (relayStates[a.relay_index] ?? null) : null}
+        />
       ))}
       {/* Help card occupies the next grid cell, same aesthetics as relay cards */}
       <BehaviorHelpCard />
