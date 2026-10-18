@@ -872,6 +872,7 @@ export default function ControllersModule() {
     queryKey: ['controllers'],
     queryFn: getControllers,
     enabled: !!hasFeature,
+    refetchInterval: 15_000, // refresh every 15s to pick up relay state changes from heartbeats
   })
 
   // When controllers load, ensure none start as collapsed (all expanded by default)
