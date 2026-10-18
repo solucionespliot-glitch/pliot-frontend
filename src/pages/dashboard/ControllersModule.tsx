@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query'
 import { fetchMe } from '../../services/api'
 import {
@@ -38,14 +38,31 @@ const smallBtnStyle: React.CSSProperties = {
   color: '#374151',
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers / constants ───────────────────────────────────────────────────────
 
 const BEHAVIOR_LABELS: Record<BehaviorType, string> = {
-  vpd:         'Nebulización VPD',
-  schedule:    'Horario',
-  irrigation:  'Riego programado',
-  temperature: 'Temperatura',
-  manual:      'Manual',
+  vpd:                'Nebulización VPD',
+  schedule:           'Horario',
+  irrigation:         'Riego programado',
+  temperature:        'Temperatura',
+  manual:             'Manual',
+  blocked_by_program: 'Controlado por programa',
+}
+
+const DAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+
+// Normalize old flat schedule/irrigation configs to the new multi-group format.
+// Old: { days, windows } → New: { groups: [{ days, windows }] }
+function normalizeConfig(type: BehaviorType, config: Record<string, unknown>): Record<string, unknown> {
+  if (type === 'schedule') {
+    if (Array.isArray((config as Record<string, unknown>).groups)) return config
+    return { groups: [{ days: (config.days as number[]) ?? [1, 2, 3, 4, 5], windows: (config.windows as unknown[]) ?? [{ on_time: '08:00', off_time: '20:00' }] }] }
+  }
+  if (type === 'irrigation') {
+    if (Array.isArray((config as Record<string, unknown>).groups)) return config
+    return { groups: [{ days: (config.days as number[]) ?? [1, 2, 3, 4, 5, 6, 7], events: (config.events as unknown[]) ?? [{ time: '08:00', duration_minutes: 20 }] }] }
+  }
+  return config
 }
 
 const DEFAULT_CONFIGS: Record<BehaviorType, Record<string, unknown>> = {
@@ -58,12 +75,10 @@ const DEFAULT_CONFIGS: Record<BehaviorType, Record<string, unknown>> = {
     stale_timeout_minutes: 15,
   },
   schedule: {
-    days: [1, 2, 3, 4, 5],
-    windows: [{ on_time: '08:00', off_time: '20:00' }],
+    groups: [{ days: [1, 2, 3, 4, 5], windows: [{ on_time: '08:00', off_time: '20:00' }] }],
   },
   irrigation: {
-    days: [1, 2, 3, 4, 5, 6, 7],
-    events: [{ time: '08:00', duration_minutes: 20 }],
+    groups: [{ days: [1, 2, 3, 4, 5, 6, 7], events: [{ time: '08:00', duration_minutes: 20 }] }],
   },
   temperature: {
     mode: 'heat',
@@ -73,9 +88,8 @@ const DEFAULT_CONFIGS: Record<BehaviorType, Record<string, unknown>> = {
     stale_timeout_minutes: 15,
   },
   manual: {},
+  blocked_by_program: {},
 }
-
-const DAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
 
 const SYNC_COLORS: Record<Controller['sync_status'], { bg: string; text: string }> = {
   synced:  { bg: '#d1fae5', text: '#065f46' },
@@ -90,32 +104,37 @@ const OVERRIDE_OPTIONS: { value: Controller['override_mode']; label: string }[] 
   { value: 'permanent',     label: 'Permanente'       },
 ]
 
-// Contextual explanations shown in the help panel
+// Contextual explanations for the help card
 const BEHAVIOR_HELP: Record<BehaviorType, { title: string; body: string; nodes: string }> = {
   vpd: {
     title: 'Nebulización por VPD',
-    body: 'El relé se activa cuando el Déficit de Presión de Vapor (VPD) del ambiente supera el umbral configurado. Un VPD alto indica que el aire está muy seco y puede estresar las plantas. El ciclo es: ON durante "Duración ON", luego OFF durante "Duración OFF", y se repite mientras el VPD siga alto.',
-    nodes: 'Los nodos de influencia son los sensores de temperatura y humedad que proveen los datos. Lógica "cualquiera": activa si al menos un nodo supera el umbral. "Todos": requiere que todos lo superen. "Promedio": usa el promedio de todos los nodos. "Tiempo máx. sin dato": si no llega ningún dato nuevo en ese lapso, el relé se detiene (el sensor se considera caído).',
+    body: 'El relé se activa cuando el Déficit de Presión de Vapor (VPD) del ambiente supera el umbral configurado. Un VPD alto indica que el aire está muy seco. El ciclo es: ON durante "Duración ON", luego OFF durante "Duración OFF", y se repite mientras el VPD siga alto. El "Rango horario activo" es opcional: si se activa, el relé solo puede encenderse dentro de ese horario — fuera de él no arranca aunque el VPD supere el umbral.',
+    nodes: 'Los nodos de influencia proveen temperatura y humedad. Lógica "cualquiera": activa si al menos un nodo supera el umbral. "Todos": requiere que todos lo superen. "Promedio": usa el promedio. "Tiempo máx. sin dato": si no llega ningún dato en ese lapso, el relé se detiene (sensor considerado caído).',
   },
   schedule: {
     title: 'Horario fijo',
-    body: 'El relé se activa y desactiva según un horario fijo, sin depender de condiciones ambientales. Se pueden configurar múltiples ventanas horarias por día. Útil para ventilación programada, dosificación periódica o cualquier tarea que deba ocurrir a horas determinadas.',
+    body: 'El relé se activa y desactiva según un horario fijo, sin depender de condiciones ambientales. Podés configurar múltiples grupos de días, cada uno con sus propias ventanas horarias. Por ejemplo: lunes y miércoles de 8 a 20h, el resto de días de 8 a 10h.',
     nodes: 'Los nodos de influencia no se usan en este modo.',
   },
   irrigation: {
     title: 'Riego programado',
-    body: 'El relé activa riegos en días y horarios específicos. Cada evento define la hora de inicio y la duración. Se pueden configurar múltiples eventos por día. Útil para sistemas de riego por goteo o aspersión con tiempos fijos.',
+    body: 'El relé activa riegos en días y horarios específicos. Podés configurar múltiples grupos de días, cada uno con sus propios eventos de riego. Por ejemplo: lunes y miércoles con 2 horas de riego, el resto de días con 1 hora.',
     nodes: 'Los nodos de influencia no se usan en este modo.',
   },
   temperature: {
     title: 'Control de temperatura',
-    body: 'El relé mantiene la temperatura dentro del rango configurado. Calefacción: enciende cuando la temperatura cae bajo el mínimo y apaga cuando supera el máximo. Enfriamiento: enciende cuando supera el máximo y apaga cuando cae bajo el mínimo. La histeresis evita que el relé cicle demasiado rápido.',
-    nodes: 'Los nodos de influencia deben ser sensores de temperatura. "Tiempo máx. sin dato": si no llega ningún dato nuevo en ese lapso, el relé se detiene por seguridad.',
+    body: 'El relé mantiene la temperatura dentro del rango configurado. Calefacción: enciende cuando la temperatura cae bajo el mínimo y apaga cuando supera el máximo. Enfriamiento: enciende cuando supera el máximo y apaga cuando cae bajo el mínimo. La histeresis evita ciclos rápidos.',
+    nodes: 'Los nodos de influencia deben ser sensores de temperatura. "Tiempo máx. sin dato": si no llega ningún dato en ese lapso, el relé se detiene por seguridad.',
   },
   manual: {
     title: 'Control manual',
-    body: 'El relé solo se activa por comando manual desde el dashboard (botón "Enviar pulso") o desde el portal local del controlador. No hay ningún criterio automático. Útil para pruebas, actuaciones puntuales o mientras se configura el sistema.',
+    body: 'El relé solo se activa por comando manual desde el dashboard (botón "Enviar pulso") o desde el portal local del controlador. No hay automatización. Útil para pruebas o actuaciones puntuales.',
     nodes: 'Los nodos de influencia no se usan en este modo.',
+  },
+  blocked_by_program: {
+    title: 'Controlado por programa de cultivo',
+    body: 'Este relé está bajo control del módulo de programa de riego. Los ciclos son determinados automáticamente por el modelo de cultivo activo, calculando la demanda hídrica según la etapa fenológica, temperatura acumulada y coeficiente de cultivo (Kc). La configuración manual está desactivada.',
+    nodes: 'Los nodos de influencia se definen en el programa de cultivo asociado a esta zona.',
   },
 }
 
@@ -165,9 +184,7 @@ function DaySelector({ days, onChange }: { days: number[]; onChange: (days: numb
         const dayNum = i + 1
         const active = days.includes(dayNum)
         return (
-          <button
-            key={dayNum}
-            type="button"
+          <button key={dayNum} type="button"
             onClick={() => onChange(active ? days.filter(x => x !== dayNum) : [...days, dayNum].sort())}
             style={{
               width: 28, height: 28, borderRadius: 6, border: '1px solid',
@@ -176,9 +193,7 @@ function DaySelector({ days, onChange }: { days: number[]; onChange: (days: numb
               color: active ? 'white' : '#6b7280',
               fontSize: 12, fontWeight: 600, cursor: 'pointer', lineHeight: 1,
             }}
-          >
-            {d}
-          </button>
+          >{d}</button>
         )
       })}
     </div>
@@ -189,13 +204,25 @@ function DaySelector({ days, onChange }: { days: number[]; onChange: (days: numb
 
 function VpdForm({ config, setConfig }: { config: Record<string, unknown>; setConfig: (c: Record<string, unknown>) => void }) {
   const set = (key: string, value: unknown) => setConfig({ ...config, [key]: value })
+
+  // Active window is enabled when both fields are present in the config
+  const windowEnabled = !!(config.active_window_start || config.active_window_end)
+
+  function toggleWindow(enabled: boolean) {
+    if (enabled) {
+      setConfig({ ...config, active_window_start: '08:00', active_window_end: '20:00' })
+    } else {
+      // Remove the window fields from the config
+      const { active_window_start: _s, active_window_end: _e, ...rest } = config
+      setConfig(rest)
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <FormRow label="Umbral VPD">
-        <input type="number" step="0.1" min="0" max="5"
-          value={(config.vpd_threshold as number) ?? 0.8}
-          onChange={e => set('vpd_threshold', parseFloat(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" step="0.1" min="0" max="5" value={(config.vpd_threshold as number) ?? 0.8}
+          onChange={e => set('vpd_threshold', parseFloat(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>kPa</span>
       </FormRow>
       <FormRow label="Lógica nodos">
@@ -206,67 +233,185 @@ function VpdForm({ config, setConfig }: { config: Record<string, unknown>; setCo
         </select>
       </FormRow>
       <FormRow label="Histeresis">
-        <input type="number" step="0.05" min="0" max="2"
-          value={(config.hysteresis as number) ?? 0.1}
-          onChange={e => set('hysteresis', parseFloat(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" step="0.05" min="0" max="2" value={(config.hysteresis as number) ?? 0.1}
+          onChange={e => set('hysteresis', parseFloat(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>kPa</span>
       </FormRow>
       <FormRow label="Duración ON">
-        <input type="number" min="1" max="3600"
-          value={(config.on_duration_seconds as number) ?? 30}
-          onChange={e => set('on_duration_seconds', parseInt(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" min="1" max="3600" value={(config.on_duration_seconds as number) ?? 30}
+          onChange={e => set('on_duration_seconds', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>seg</span>
       </FormRow>
       <FormRow label="Duración OFF">
-        <input type="number" min="1" max="3600"
-          value={(config.off_duration_seconds as number) ?? 120}
-          onChange={e => set('off_duration_seconds', parseInt(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" min="1" max="3600" value={(config.off_duration_seconds as number) ?? 120}
+          onChange={e => set('off_duration_seconds', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>seg</span>
       </FormRow>
       <FormRow label="Tiempo máx. sin dato">
-        <input type="number" min="1" max="60"
-          value={(config.stale_timeout_minutes as number) ?? 15}
-          onChange={e => set('stale_timeout_minutes', parseInt(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" min="1" max="60" value={(config.stale_timeout_minutes as number) ?? 15}
+          onChange={e => set('stale_timeout_minutes', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>min</span>
+      </FormRow>
+
+      {/* Optional active time window */}
+      <FormRow label="Rango horario activo">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={windowEnabled} onChange={e => toggleWindow(e.target.checked)} />
+          <span style={{ fontSize: 13, color: '#374151' }}>Restringir a horario</span>
+        </label>
+        {windowEnabled && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+            <span style={unitStyle}>de</span>
+            <input type="time" value={(config.active_window_start as string) ?? '08:00'}
+              onChange={e => set('active_window_start', e.target.value)} style={{ ...inputStyle, width: 100 }} />
+            <span style={unitStyle}>a</span>
+            <input type="time" value={(config.active_window_end as string) ?? '20:00'}
+              onChange={e => set('active_window_end', e.target.value)} style={{ ...inputStyle, width: 100 }} />
+          </div>
+        )}
+      </FormRow>
+    </div>
+  )
+}
+
+// Schedule day-group: days selector + time windows
+type ScheduleGroup = { days: number[]; windows: Array<{ on_time: string; off_time: string }> }
+
+function ScheduleGroupRow({
+  group,
+  groupIndex,
+  totalGroups,
+  onChange,
+  onRemove,
+}: {
+  group: ScheduleGroup
+  groupIndex: number
+  totalGroups: number
+  onChange: (g: ScheduleGroup) => void
+  onRemove: () => void
+}) {
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', letterSpacing: '0.04em' }}>
+          GRUPO {groupIndex + 1}
+        </span>
+        {totalGroups > 1 && (
+          <button type="button" onClick={onRemove}
+            style={{ ...smallBtnStyle, fontSize: 11, color: '#dc2626', borderColor: '#fca5a5' }}>
+            Eliminar
+          </button>
+        )}
+      </div>
+      <FormRow label="Días activos">
+        <DaySelector days={group.days} onChange={days => onChange({ ...group, days })} />
+      </FormRow>
+      <FormRow label="Ventanas horarias">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {group.windows.map((w, wi) => (
+            <div key={wi} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={unitStyle}>de</span>
+              <input type="time" value={w.on_time}
+                onChange={e => onChange({ ...group, windows: group.windows.map((w2, j) => j === wi ? { ...w2, on_time: e.target.value } : w2) })}
+                style={{ ...inputStyle, width: 100 }} />
+              <span style={unitStyle}>a</span>
+              <input type="time" value={w.off_time}
+                onChange={e => onChange({ ...group, windows: group.windows.map((w2, j) => j === wi ? { ...w2, off_time: e.target.value } : w2) })}
+                style={{ ...inputStyle, width: 100 }} />
+              {group.windows.length > 1 && (
+                <button type="button" onClick={() => onChange({ ...group, windows: group.windows.filter((_, j) => j !== wi) })}
+                  style={{ ...smallBtnStyle, color: '#dc2626', borderColor: '#fca5a5' }}>✕</button>
+              )}
+            </div>
+          ))}
+          {group.windows.length < 10 && (
+            <button type="button" onClick={() => onChange({ ...group, windows: [...group.windows, { on_time: '08:00', off_time: '20:00' }] })}
+              style={{ ...smallBtnStyle, alignSelf: 'flex-start' }}>+ Ventana</button>
+          )}
+        </div>
       </FormRow>
     </div>
   )
 }
 
 function ScheduleForm({ config, setConfig }: { config: Record<string, unknown>; setConfig: (c: Record<string, unknown>) => void }) {
-  const days = (config.days as number[]) ?? [1, 2, 3, 4, 5]
-  const windows = (config.windows as Array<{ on_time: string; off_time: string }>) ?? [{ on_time: '08:00', off_time: '20:00' }]
-  const setWindows = (updated: typeof windows) => setConfig({ ...config, windows: updated })
+  const groups = (config.groups as ScheduleGroup[]) ?? [{ days: [1, 2, 3, 4, 5], windows: [{ on_time: '08:00', off_time: '20:00' }] }]
+
+  const updateGroup = (i: number, g: ScheduleGroup) => setConfig({ groups: groups.map((g2, j) => j === i ? g : g2) })
+  const removeGroup = (i: number) => setConfig({ groups: groups.filter((_, j) => j !== i) })
+  const addGroup = () => {
+    // Default new group to days not already used by existing groups
+    const usedDays = groups.flatMap(g => g.days)
+    const freeDays = [1, 2, 3, 4, 5, 6, 7].filter(d => !usedDays.includes(d))
+    setConfig({ groups: [...groups, { days: freeDays.length > 0 ? freeDays : [1], windows: [{ on_time: '08:00', off_time: '20:00' }] }] })
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {groups.map((g, i) => (
+        <ScheduleGroupRow key={i} group={g} groupIndex={i} totalGroups={groups.length}
+          onChange={updated => updateGroup(i, updated)} onRemove={() => removeGroup(i)} />
+      ))}
+      {groups.length < 7 && (
+        <button type="button" onClick={addGroup}
+          style={{ ...smallBtnStyle, alignSelf: 'flex-start' }}>+ Agregar grupo de días</button>
+      )}
+    </div>
+  )
+}
+
+// Irrigation day-group: days selector + timed events
+type IrrigationGroup = { days: number[]; events: Array<{ time: string; duration_minutes: number }> }
+
+function IrrigationGroupRow({
+  group,
+  groupIndex,
+  totalGroups,
+  onChange,
+  onRemove,
+}: {
+  group: IrrigationGroup
+  groupIndex: number
+  totalGroups: number
+  onChange: (g: IrrigationGroup) => void
+  onRemove: () => void
+}) {
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', letterSpacing: '0.04em' }}>
+          GRUPO {groupIndex + 1}
+        </span>
+        {totalGroups > 1 && (
+          <button type="button" onClick={onRemove}
+            style={{ ...smallBtnStyle, fontSize: 11, color: '#dc2626', borderColor: '#fca5a5' }}>
+            Eliminar
+          </button>
+        )}
+      </div>
       <FormRow label="Días activos">
-        <DaySelector days={days} onChange={d => setConfig({ ...config, days: d })} />
+        <DaySelector days={group.days} onChange={days => onChange({ ...group, days })} />
       </FormRow>
-      <FormRow label="Ventanas horarias">
+      <FormRow label="Eventos">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {windows.map((w, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={unitStyle}>de</span>
-              <input type="time" value={w.on_time}
-                onChange={e => setWindows(windows.map((w2, j) => j === i ? { ...w2, on_time: e.target.value } : w2))}
+          {group.events.map((ev, ei) => (
+            <div key={ei} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input type="time" value={ev.time}
+                onChange={e => onChange({ ...group, events: group.events.map((e2, j) => j === ei ? { ...e2, time: e.target.value } : e2) })}
                 style={{ ...inputStyle, width: 100 }} />
-              <span style={unitStyle}>a</span>
-              <input type="time" value={w.off_time}
-                onChange={e => setWindows(windows.map((w2, j) => j === i ? { ...w2, off_time: e.target.value } : w2))}
-                style={{ ...inputStyle, width: 100 }} />
-              {windows.length > 1 && (
-                <button type="button" onClick={() => setWindows(windows.filter((_, j) => j !== i))}
+              <input type="number" min="1" max="1440" value={ev.duration_minutes}
+                onChange={e => onChange({ ...group, events: group.events.map((e2, j) => j === ei ? { ...e2, duration_minutes: parseInt(e.target.value) } : e2) })}
+                style={{ ...inputStyle, width: 64 }} />
+              <span style={unitStyle}>min</span>
+              {group.events.length > 1 && (
+                <button type="button" onClick={() => onChange({ ...group, events: group.events.filter((_, j) => j !== ei) })}
                   style={{ ...smallBtnStyle, color: '#dc2626', borderColor: '#fca5a5' }}>✕</button>
               )}
             </div>
           ))}
-          {windows.length < 10 && (
-            <button type="button" onClick={() => setWindows([...windows, { on_time: '08:00', off_time: '20:00' }])}
-              style={{ ...smallBtnStyle, alignSelf: 'flex-start', marginTop: 2 }}>+ Ventana</button>
+          {group.events.length < 20 && (
+            <button type="button" onClick={() => onChange({ ...group, events: [...group.events, { time: '08:00', duration_minutes: 20 }] })}
+              style={{ ...smallBtnStyle, alignSelf: 'flex-start' }}>+ Evento</button>
           )}
         </div>
       </FormRow>
@@ -275,37 +420,26 @@ function ScheduleForm({ config, setConfig }: { config: Record<string, unknown>; 
 }
 
 function IrrigationForm({ config, setConfig }: { config: Record<string, unknown>; setConfig: (c: Record<string, unknown>) => void }) {
-  const days = (config.days as number[]) ?? [1, 2, 3, 4, 5, 6, 7]
-  const events = (config.events as Array<{ time: string; duration_minutes: number }>) ?? [{ time: '08:00', duration_minutes: 20 }]
-  const setEvents = (updated: typeof events) => setConfig({ ...config, events: updated })
+  const groups = (config.groups as IrrigationGroup[]) ?? [{ days: [1, 2, 3, 4, 5, 6, 7], events: [{ time: '08:00', duration_minutes: 20 }] }]
+
+  const updateGroup = (i: number, g: IrrigationGroup) => setConfig({ groups: groups.map((g2, j) => j === i ? g : g2) })
+  const removeGroup = (i: number) => setConfig({ groups: groups.filter((_, j) => j !== i) })
+  const addGroup = () => {
+    const usedDays = groups.flatMap(g => g.days)
+    const freeDays = [1, 2, 3, 4, 5, 6, 7].filter(d => !usedDays.includes(d))
+    setConfig({ groups: [...groups, { days: freeDays.length > 0 ? freeDays : [1], events: [{ time: '08:00', duration_minutes: 20 }] }] })
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <FormRow label="Días activos">
-        <DaySelector days={days} onChange={d => setConfig({ ...config, days: d })} />
-      </FormRow>
-      <FormRow label="Eventos">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {events.map((ev, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input type="time" value={ev.time}
-                onChange={e => setEvents(events.map((e2, j) => j === i ? { ...e2, time: e.target.value } : e2))}
-                style={{ ...inputStyle, width: 100 }} />
-              <input type="number" min="1" max="1440" value={ev.duration_minutes}
-                onChange={e => setEvents(events.map((e2, j) => j === i ? { ...e2, duration_minutes: parseInt(e.target.value) } : e2))}
-                style={{ ...inputStyle, width: 64 }} />
-              <span style={unitStyle}>min</span>
-              {events.length > 1 && (
-                <button type="button" onClick={() => setEvents(events.filter((_, j) => j !== i))}
-                  style={{ ...smallBtnStyle, color: '#dc2626', borderColor: '#fca5a5' }}>✕</button>
-              )}
-            </div>
-          ))}
-          {events.length < 20 && (
-            <button type="button" onClick={() => setEvents([...events, { time: '08:00', duration_minutes: 20 }])}
-              style={{ ...smallBtnStyle, alignSelf: 'flex-start', marginTop: 2 }}>+ Evento</button>
-          )}
-        </div>
-      </FormRow>
+      {groups.map((g, i) => (
+        <IrrigationGroupRow key={i} group={g} groupIndex={i} totalGroups={groups.length}
+          onChange={updated => updateGroup(i, updated)} onRemove={() => removeGroup(i)} />
+      ))}
+      {groups.length < 7 && (
+        <button type="button" onClick={addGroup}
+          style={{ ...smallBtnStyle, alignSelf: 'flex-start' }}>+ Agregar grupo de días</button>
+      )}
     </div>
   )
 }
@@ -321,31 +455,23 @@ function TemperatureForm({ config, setConfig }: { config: Record<string, unknown
         </select>
       </FormRow>
       <FormRow label="Temp. mínima">
-        <input type="number" step="0.5" min="-20" max="60"
-          value={(config.min_temp as number) ?? 15}
-          onChange={e => set('min_temp', parseFloat(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" step="0.5" min="-20" max="60" value={(config.min_temp as number) ?? 15}
+          onChange={e => set('min_temp', parseFloat(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>°C</span>
       </FormRow>
       <FormRow label="Temp. máxima">
-        <input type="number" step="0.5" min="-20" max="60"
-          value={(config.max_temp as number) ?? 25}
-          onChange={e => set('max_temp', parseFloat(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" step="0.5" min="-20" max="60" value={(config.max_temp as number) ?? 25}
+          onChange={e => set('max_temp', parseFloat(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>°C</span>
       </FormRow>
       <FormRow label="Histeresis">
-        <input type="number" step="0.1" min="0" max="10"
-          value={(config.hysteresis as number) ?? 0.5}
-          onChange={e => set('hysteresis', parseFloat(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" step="0.1" min="0" max="10" value={(config.hysteresis as number) ?? 0.5}
+          onChange={e => set('hysteresis', parseFloat(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>°C</span>
       </FormRow>
       <FormRow label="Tiempo máx. sin dato">
-        <input type="number" min="1" max="60"
-          value={(config.stale_timeout_minutes as number) ?? 15}
-          onChange={e => set('stale_timeout_minutes', parseInt(e.target.value))}
-          style={{ ...inputStyle, width: 80 }} />
+        <input type="number" min="1" max="60" value={(config.stale_timeout_minutes as number) ?? 15}
+          onChange={e => set('stale_timeout_minutes', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>min</span>
       </FormRow>
     </div>
@@ -361,6 +487,14 @@ function BehaviorConfigForm({ type, config, setConfig }: {
   if (type === 'schedule')    return <ScheduleForm    config={config} setConfig={setConfig} />
   if (type === 'irrigation')  return <IrrigationForm  config={config} setConfig={setConfig} />
   if (type === 'temperature') return <TemperatureForm config={config} setConfig={setConfig} />
+  if (type === 'blocked_by_program') {
+    return (
+      <p style={{ margin: 0, fontSize: 13, color: '#6b7280', fontStyle: 'italic' }}>
+        Este relé está bajo control del programa de cultivo. La configuración manual no aplica.
+      </p>
+    )
+  }
+  // manual
   return (
     <p style={{ margin: 0, fontSize: 13, color: '#6b7280', fontStyle: 'italic' }}>
       Sin automatización. Use el pulso manual para activar este relé.
@@ -368,66 +502,54 @@ function BehaviorConfigForm({ type, config, setConfig }: {
   )
 }
 
-// ── BehaviorHelpCard — contextual documentation at the bottom of the panel ────
+// ── BehaviorHelpCard — styled like an ActuatorCard, shown as the last "relay" ─
 
 function BehaviorHelpCard() {
   const [helpType, setHelpType] = useState<BehaviorType>('vpd')
-  const [open, setOpen] = useState(false)
   const help = BEHAVIOR_HELP[helpType]
 
   return (
     <div style={{
-      background: '#f0f9ff',
-      border: '1px solid #bae6fd',
+      background: 'white',
+      border: '1px solid #e0e7ff',
       borderRadius: 10,
-      overflow: 'hidden',
+      padding: 18,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 18,
     }}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        style={{
-          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10,
-          textAlign: 'left',
-        }}
-      >
-        <span style={{ fontSize: 16 }}>?</span>
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#0369a1', flex: 1 }}>
-          Ayuda — ¿Qué significa cada comportamiento?
+      {/* Header — same structure as ActuatorCard */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{
+          background: '#e0e7ff', borderRadius: 6, padding: '2px 10px',
+          fontSize: 12, fontWeight: 700, color: '#4338ca', flexShrink: 0,
+        }}>
+          ?
         </span>
-        <span style={{ fontSize: 12, color: '#0369a1' }}>{open ? '▲' : '▼'}</span>
-      </button>
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#4338ca' }}>
+          Guía de comportamientos
+        </span>
+      </div>
 
-      {open && (
-        <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: '#0369a1', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>
-              SELECCIONAR COMPORTAMIENTO
-            </label>
-            <select
-              value={helpType}
-              onChange={e => setHelpType(e.target.value as BehaviorType)}
-              style={{ ...inputStyle, width: '100%', background: 'white' }}
-            >
-              {(Object.keys(BEHAVIOR_LABELS) as BehaviorType[]).map(t => (
-                <option key={t} value={t}>{BEHAVIOR_LABELS[t]}</option>
-              ))}
-            </select>
-          </div>
+      {/* Type selector */}
+      <div>
+        <SectionLabel>SELECCIONAR TIPO</SectionLabel>
+        <select value={helpType} onChange={e => setHelpType(e.target.value as BehaviorType)}
+          style={{ ...inputStyle, width: '100%' }}>
+          {(Object.keys(BEHAVIOR_LABELS) as BehaviorType[]).map(t => (
+            <option key={t} value={t}>{BEHAVIOR_LABELS[t]}</option>
+          ))}
+        </select>
+      </div>
 
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#0c4a6e', marginBottom: 8 }}>
-              {help.title}
-            </div>
-            <p style={{ margin: '0 0 10px', fontSize: 13, color: '#374151', lineHeight: 1.6 }}>
-              {help.body}
-            </p>
-            <p style={{ margin: 0, fontSize: 13, color: '#374151', lineHeight: 1.6 }}>
-              <strong>Nodos de influencia:</strong> {help.nodes}
-            </p>
-          </div>
-        </div>
-      )}
+      {/* Help content */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#1e1b4b' }}>{help.title}</div>
+        <p style={{ margin: 0, fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{help.body}</p>
+        <p style={{ margin: 0, fontSize: 13, color: '#374151', lineHeight: 1.6 }}>
+          <strong>Nodos de influencia:</strong> {help.nodes}
+        </p>
+      </div>
     </div>
   )
 }
@@ -445,19 +567,16 @@ function ActuatorCard({
 }) {
   const queryClient = useQueryClient()
 
-  // Draft state for behavior editing
+  const initialConfig = Object.keys(actuator.behavior_config ?? {}).length > 0
+    ? normalizeConfig(actuator.behavior_type, actuator.behavior_config)
+    : DEFAULT_CONFIGS[actuator.behavior_type]
+
   const [draftType, setDraftType]     = useState<BehaviorType>(actuator.behavior_type)
-  const [draftConfig, setDraftConfig] = useState<Record<string, unknown>>(
-    Object.keys(actuator.behavior_config ?? {}).length > 0
-      ? actuator.behavior_config
-      : DEFAULT_CONFIGS[actuator.behavior_type],
-  )
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>(
-    actuator.influence_nodes.map(n => n.id),
-  )
+  const [draftConfig, setDraftConfig] = useState<Record<string, unknown>>(initialConfig)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>(actuator.influence_nodes.map(n => n.id))
   const [pulseDuration, setPulseDuration] = useState(5)
 
-  // Inline label editing state
+  // Inline label editing
   const [isEditingLabel, setIsEditingLabel] = useState(false)
   const [labelValue, setLabelValue]         = useState(actuator.label)
   const labelInputRef = useRef<HTMLInputElement>(null)
@@ -496,13 +615,13 @@ function ActuatorCard({
     labelMutation.mutate(trimmed, { onSuccess: () => setIsEditingLabel(false) })
   }
 
+  const savedConfig = Object.keys(actuator.behavior_config ?? {}).length > 0
+    ? normalizeConfig(actuator.behavior_type, actuator.behavior_config)
+    : DEFAULT_CONFIGS[actuator.behavior_type]
+
   const hasBehaviorChanges =
     draftType !== actuator.behavior_type ||
-    JSON.stringify(draftConfig) !== JSON.stringify(
-      Object.keys(actuator.behavior_config ?? {}).length > 0
-        ? actuator.behavior_config
-        : DEFAULT_CONFIGS[actuator.behavior_type],
-    )
+    JSON.stringify(draftConfig) !== JSON.stringify(savedConfig)
 
   const hasNodeChanges =
     JSON.stringify([...selectedNodeIds].sort()) !==
@@ -513,46 +632,23 @@ function ActuatorCard({
   )
 
   return (
-    <div style={{
-      background: 'white',
-      border: '1px solid #e5e7eb',
-      borderRadius: 10,
-      padding: 18,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 18,
-    }}>
-      {/* Header: relay index + editable label */}
+    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: 18, display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{
-          background: '#f3f4f6', borderRadius: 6, padding: '2px 10px',
-          fontSize: 12, fontWeight: 700, color: '#374151', flexShrink: 0,
-        }}>
+        <span style={{ background: '#f3f4f6', borderRadius: 6, padding: '2px 10px', fontSize: 12, fontWeight: 700, color: '#374151', flexShrink: 0 }}>
           Re{actuator.relay_index + 1}
         </span>
-
         {isEditingLabel ? (
-          <input
-            ref={labelInputRef}
-            value={labelValue}
+          <input ref={labelInputRef} value={labelValue}
             onChange={e => setLabelValue(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') commitLabelEdit(); if (e.key === 'Escape') setIsEditingLabel(false) }}
             onBlur={commitLabelEdit}
             disabled={labelMutation.isPending}
-            style={{ ...inputStyle, flex: 1, fontSize: 14, fontWeight: 600 }}
-            autoFocus
-          />
+            style={{ ...inputStyle, flex: 1, fontSize: 14, fontWeight: 600 }} autoFocus />
         ) : (
-          <button
-            type="button"
-            onClick={() => { setLabelValue(actuator.label); setIsEditingLabel(true); }}
+          <button type="button" onClick={() => { setLabelValue(actuator.label); setIsEditingLabel(true) }}
             title="Editar nombre del relé"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              background: 'none', border: '1px solid transparent', borderRadius: 6,
-              padding: '2px 6px', cursor: 'pointer', color: '#111827',
-            }}
-          >
+            style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: '1px solid transparent', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', color: '#111827' }}>
             <span style={{ fontSize: 14, fontWeight: 600 }}>{actuator.label}</span>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -560,20 +656,13 @@ function ActuatorCard({
             </svg>
           </button>
         )}
-
-        {!actuator.enabled && (
-          <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 'auto' }}>deshabilitado</span>
-        )}
+        {!actuator.enabled && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 'auto' }}>deshabilitado</span>}
       </div>
 
-      {/* Behavior type selector */}
+      {/* Behavior type */}
       <div>
         <SectionLabel>COMPORTAMIENTO</SectionLabel>
-        <select
-          value={draftType}
-          onChange={e => handleTypeChange(e.target.value as BehaviorType)}
-          style={{ ...inputStyle, width: '100%' }}
-        >
+        <select value={draftType} onChange={e => handleTypeChange(e.target.value as BehaviorType)} style={{ ...inputStyle, width: '100%' }}>
           {(Object.keys(BEHAVIOR_LABELS) as BehaviorType[]).map(t => (
             <option key={t} value={t}>{BEHAVIOR_LABELS[t]}</option>
           ))}
@@ -587,46 +676,27 @@ function ActuatorCard({
       </div>
 
       {hasBehaviorChanges && (
-        <button
-          type="button"
-          onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
-          style={{
-            background: '#3b82f6', color: 'white', border: 'none',
-            borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600,
-            cursor: 'pointer', alignSelf: 'flex-start',
-          }}
-        >
+        <button type="button" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+          style={{ background: '#3b82f6', color: 'white', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-start' }}>
           {saveMutation.isPending ? 'Guardando...' : 'Guardar comportamiento'}
         </button>
       )}
-      {saveMutation.isSuccess && !hasBehaviorChanges && (
-        <span style={{ fontSize: 12, color: '#16a34a' }}>✓ Guardado</span>
-      )}
-      {saveMutation.isError && (
-        <span style={{ fontSize: 12, color: '#dc2626' }}>Error al guardar</span>
-      )}
+      {saveMutation.isSuccess && !hasBehaviorChanges && <span style={{ fontSize: 12, color: '#16a34a' }}>✓ Guardado</span>}
+      {saveMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al guardar</span>}
 
       {/* Influence nodes */}
       <div>
         <SectionLabel>NODOS DE INFLUENCIA</SectionLabel>
         {sensorDevices.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: '#9ca3af', fontStyle: 'italic' }}>
-            No hay sensores en este sitio.
-          </p>
+          <p style={{ margin: 0, fontSize: 13, color: '#9ca3af', fontStyle: 'italic' }}>No hay sensores en este sitio.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {sensorDevices.map(d => {
               const checked = selectedNodeIds.includes(d.id)
               return (
                 <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => setSelectedNodeIds(
-                      checked ? selectedNodeIds.filter(id => id !== d.id) : [...selectedNodeIds, d.id],
-                    )}
-                  />
+                  <input type="checkbox" checked={checked}
+                    onChange={() => setSelectedNodeIds(checked ? selectedNodeIds.filter(id => id !== d.id) : [...selectedNodeIds, d.id])} />
                   <span style={{ fontSize: 13, fontWeight: 500, color: '#374151' }}>{d.display_name}</span>
                   <span style={{ fontSize: 11, color: '#9ca3af' }}>{d.device_type}</span>
                 </label>
@@ -635,53 +705,31 @@ function ActuatorCard({
           </div>
         )}
         {hasNodeChanges && (
-          <button
-            type="button"
-            onClick={() => nodesMutation.mutate()}
-            disabled={nodesMutation.isPending}
-            style={{
-              marginTop: 10, background: '#f9fafb', color: '#374151',
-              border: '1px solid #d1d5db', borderRadius: 6,
-              padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
+          <button type="button" onClick={() => nodesMutation.mutate()} disabled={nodesMutation.isPending}
+            style={{ marginTop: 10, background: '#f9fafb', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             {nodesMutation.isPending ? 'Guardando...' : 'Guardar nodos'}
           </button>
         )}
-        {nodesMutation.isSuccess && !hasNodeChanges && (
-          <span style={{ fontSize: 12, color: '#16a34a', display: 'block', marginTop: 6 }}>✓ Nodos actualizados</span>
-        )}
+        {nodesMutation.isSuccess && !hasNodeChanges && <span style={{ fontSize: 12, color: '#16a34a', display: 'block', marginTop: 6 }}>✓ Nodos actualizados</span>}
       </div>
 
       {/* Pulse relay */}
       <div>
         <SectionLabel>PULSO MANUAL</SectionLabel>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input
-            type="number" min="1" max="120"
-            value={pulseDuration}
-            onChange={e => setPulseDuration(parseInt(e.target.value))}
-            style={{ ...inputStyle, width: 64 }}
-          />
+          <input type="number" min="1" max="120" value={pulseDuration}
+            onChange={e => setPulseDuration(parseInt(e.target.value))} style={{ ...inputStyle, width: 64 }} />
           <span style={unitStyle}>min</span>
-          <button
-            type="button"
-            onClick={() => pulseMutation.mutate()}
-            disabled={pulseMutation.isPending}
+          <button type="button" onClick={() => pulseMutation.mutate()} disabled={pulseMutation.isPending}
             style={{
               background: pulseMutation.isSuccess ? '#d1fae5' : '#f9fafb',
               color: pulseMutation.isSuccess ? '#065f46' : '#374151',
-              border: '1px solid',
-              borderColor: pulseMutation.isSuccess ? '#a7f3d0' : '#d1d5db',
-              borderRadius: 6, padding: '6px 12px',
-              fontSize: 13, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
+              border: '1px solid', borderColor: pulseMutation.isSuccess ? '#a7f3d0' : '#d1d5db',
+              borderRadius: 6, padding: '6px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            }}>
             {pulseMutation.isPending ? '...' : pulseMutation.isSuccess ? '✓ Enviado' : 'Enviar pulso'}
           </button>
-          {pulseMutation.isError && (
-            <span style={{ fontSize: 12, color: '#dc2626' }}>Error al enviar</span>
-          )}
+          {pulseMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al enviar</span>}
         </div>
       </div>
     </div>
@@ -707,26 +755,19 @@ function ControllerActuatorsPanel({ controller }: { controller: Controller }) {
   if (loadingActuators || loadingDevices) {
     return <div style={{ padding: '20px 0', color: '#6b7280', fontSize: 14 }}>Cargando relés...</div>
   }
-
   if (errorActuators) {
     return <div style={{ padding: '12px 0', fontSize: 13, color: '#dc2626' }}>Error al cargar los relés.</div>
   }
-
   if (!actuators || actuators.length === 0) {
-    return (
-      <div style={{ padding: '20px 0', fontSize: 13, color: '#9ca3af', fontStyle: 'italic' }}>
-        Este controlador no tiene relés configurados aún.
-      </div>
-    )
+    return <div style={{ padding: '20px 0', fontSize: 13, color: '#9ca3af', fontStyle: 'italic' }}>Este controlador no tiene relés configurados aún.</div>
   }
 
   return (
-    <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
-        {actuators.map(a => (
-          <ActuatorCard key={a.id} actuator={a} controllerId={controller.id} siteDevices={siteDevices} />
-        ))}
-      </div>
+    <div style={{ paddingTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+      {actuators.map(a => (
+        <ActuatorCard key={a.id} actuator={a} controllerId={controller.id} siteDevices={siteDevices} />
+      ))}
+      {/* Help card occupies the next grid cell, same aesthetics as relay cards */}
       <BehaviorHelpCard />
     </div>
   )
@@ -755,46 +796,23 @@ function ControllerRow({
       <tr style={{ borderBottom: isExpanded ? '1px solid #e5e7eb' : '1px solid #f3f4f6' }}>
         <td style={{ padding: '12px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{
-              width: 8, height: 8, borderRadius: '50%',
-              background: controller.online ? '#22c55e' : '#d1d5db',
-              flexShrink: 0,
-            }} />
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: controller.online ? '#22c55e' : '#d1d5db', flexShrink: 0 }} />
             <span style={{ fontWeight: 500, color: '#111827' }}>{controller.device_name}</span>
           </div>
         </td>
+        <td style={{ padding: '12px 16px' }}><SyncBadge status={controller.sync_status} /></td>
         <td style={{ padding: '12px 16px' }}>
-          <SyncBadge status={controller.sync_status} />
-        </td>
-        <td style={{ padding: '12px 16px' }}>
-          <select
-            value={controller.override_mode}
-            disabled={overrideMutation.isPending}
+          <select value={controller.override_mode} disabled={overrideMutation.isPending}
             onChange={e => overrideMutation.mutate(e.target.value as Controller['override_mode'])}
-            style={{ ...inputStyle, width: 140 }}
-          >
-            {OVERRIDE_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
+            style={{ ...inputStyle, width: 140 }}>
+            {OVERRIDE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          {overrideMutation.isError && (
-            <span style={{ marginLeft: 8, fontSize: 12, color: '#991b1b' }}>Error</span>
-          )}
+          {overrideMutation.isError && <span style={{ marginLeft: 8, fontSize: 12, color: '#991b1b' }}>Error</span>}
         </td>
-        <td style={{ padding: '12px 16px', fontSize: 13, color: '#6b7280' }}>
-          {formatHeartbeat(controller.last_seen_at)}
-        </td>
+        <td style={{ padding: '12px 16px', fontSize: 13, color: '#6b7280' }}>{formatHeartbeat(controller.last_seen_at)}</td>
         <td style={{ padding: '12px 16px' }}>
-          <button
-            type="button"
-            onClick={onToggle}
-            style={{
-              background: isExpanded ? '#f3f4f6' : 'white',
-              color: '#374151', border: '1px solid #d1d5db',
-              borderRadius: 6, padding: '5px 12px',
-              fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
-            }}
-          >
+          <button type="button" onClick={onToggle}
+            style={{ background: isExpanded ? '#f3f4f6' : 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, padding: '5px 12px', fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
             {isExpanded ? '▲ Cerrar' : '▼ Relés'}
           </button>
         </td>
@@ -813,7 +831,8 @@ function ControllerRow({
 // ── ControllersModule ─────────────────────────────────────────────────────────
 
 export default function ControllersModule() {
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  // Track which controllers are collapsed — default is all expanded
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const isSuperuser = me?.role === 'superuser'
@@ -825,22 +844,27 @@ export default function ControllersModule() {
     enabled: !!hasFeature,
   })
 
-  // If the feature is not enabled for this org, show a friendly message
+  // When controllers load, ensure none start as collapsed (all expanded by default)
+  useEffect(() => {
+    setCollapsedIds(new Set())
+  }, [controllers])
+
+  const toggle = (id: string) => setCollapsedIds(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+
   if (me && !hasFeature) {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>
         <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
-          Módulo de controladores no habilitado
-        </div>
-        <div style={{ fontSize: 14 }}>
-          Este módulo no está activo para tu organización. Contactá a tu administrador de Pliot.
-        </div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Módulo de controladores no habilitado</div>
+        <div style={{ fontSize: 14 }}>Este módulo no está activo para tu organización. Contactá a tu administrador de Pliot.</div>
       </div>
     )
   }
-
-  const toggle = (id: string) => setExpandedId(prev => prev === id ? null : id)
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -857,9 +881,7 @@ export default function ControllersModule() {
           <thead>
             <tr style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
               {['Controlador', 'Sync', 'Override', 'Heartbeat', ''].map(h => (
-                <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>
-                  {h}
-                </th>
+                <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -877,7 +899,7 @@ export default function ControllersModule() {
               <ControllerRow
                 key={c.id}
                 controller={c}
-                isExpanded={expandedId === c.id}
+                isExpanded={!collapsedIds.has(c.id)}
                 onToggle={() => toggle(c.id)}
               />
             ))}

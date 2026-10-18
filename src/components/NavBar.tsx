@@ -6,10 +6,10 @@ import { getOrganizations, impersonate } from '../services/settingsService'
 import { setImpersonateOrg, fetchMe } from '../services/api'
 
 const BASE_NAV_LINKS = [
-  { to: '/dashboard/devices',     label: 'Dispositivos',  feature: null         },
-  { to: '/dashboard/irrigation',  label: 'Riego',         feature: null         },
-  { to: '/dashboard/controllers', label: 'Controladores', feature: 'controllers' },
-  { to: '/dashboard/settings',    label: 'Configuración', feature: null         },
+  { to: '/dashboard/devices',     label: 'Dispositivos',  feature: null,         hidden: false },
+  { to: '/dashboard/irrigation',  label: 'Riego',         feature: null,         hidden: true  },
+  { to: '/dashboard/controllers', label: 'Controladores', feature: 'controllers', hidden: false },
+  { to: '/dashboard/settings',    label: 'Configuración', feature: null,         hidden: true  },
 ]
 
 const activeLinkStyle: React.CSSProperties = {
@@ -46,9 +46,10 @@ export default function NavBar() {
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const isSuperuser = me?.role === 'superuser'
 
-  // Filter nav links based on org feature flags. Superuser always sees all links.
+  // Filter nav links: hidden links are never shown, feature-flagged links require
+  // the org to have that feature enabled (superusers bypass feature checks but not hidden).
   const NAV_LINKS = BASE_NAV_LINKS.filter(
-    link => !link.feature || isSuperuser || me?.features?.[link.feature],
+    link => !link.hidden && (!link.feature || isSuperuser || me?.features?.[link.feature]),
   )
 
   const { data: orgs = [] } = useQuery({

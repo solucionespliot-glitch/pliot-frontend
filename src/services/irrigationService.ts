@@ -42,7 +42,7 @@ export interface Controller {
   context: Record<string, unknown> | null
 }
 
-export type BehaviorType = 'vpd' | 'schedule' | 'irrigation' | 'temperature' | 'manual'
+export type BehaviorType = 'vpd' | 'schedule' | 'irrigation' | 'temperature' | 'manual' | 'blocked_by_program'
 
 export interface InfluenceNode {
   id: string
