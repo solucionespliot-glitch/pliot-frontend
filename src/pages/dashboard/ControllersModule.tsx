@@ -54,6 +54,27 @@ const DAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
 // Normalize old flat schedule/irrigation configs to the new multi-group format.
 // Old: { days, windows } → New: { groups: [{ days, windows }] }
 function normalizeConfig(type: BehaviorType, config: Record<string, unknown>): Record<string, unknown> {
+  if (type === 'vpd') {
+    const c = { ...config }
+    // Rename on_seconds → on_duration_seconds (old DB format)
+    if ('on_seconds' in c && !('on_duration_seconds' in c)) {
+      c.on_duration_seconds = c.on_seconds
+      delete c.on_seconds
+    }
+    // Rename off_seconds → off_duration_seconds (old DB format)
+    if ('off_seconds' in c && !('off_duration_seconds' in c)) {
+      c.off_duration_seconds = c.off_seconds
+      delete c.off_seconds
+    }
+    // Extract schedule.from/to → active_window_start/end (old DB format)
+    const sched = c.schedule as { from?: string; to?: string } | undefined
+    if (sched && !('active_window_start' in c)) {
+      if (sched.from) c.active_window_start = sched.from
+      if (sched.to)   c.active_window_end   = sched.to
+      delete c.schedule
+    }
+    return c
+  }
   if (type === 'schedule') {
     if (Array.isArray((config as Record<string, unknown>).groups)) return config
     return { groups: [{ days: (config.days as number[]) ?? [1, 2, 3, 4, 5], windows: (config.windows as unknown[]) ?? [{ on_time: '08:00', off_time: '20:00' }] }] }
@@ -556,27 +577,54 @@ function BehaviorHelpCard() {
 
 // ── ActuatorCard ──────────────────────────────────────────────────────────────
 
+// Cycle state reported by the firmware in the heartbeat.
+// CYCLE_ON: relay physically ON during a VPD/fogger pulse.
+// CYCLE_OFF: relay OFF in the rest period between pulses (fogger still active).
+// IDLE: no active cycle.
+type CycleState = 'IDLE' | 'CYCLE_ON' | 'CYCLE_OFF'
+
 function ActuatorCard({
   actuator,
   controllerId,
   siteDevices,
   relayOn,
+  cycleState,
 }: {
   actuator: Actuator
   controllerId: string
   siteDevices: Device[]
   relayOn: boolean | null
+  cycleState: CycleState | null
 }) {
   const queryClient = useQueryClient()
 
+  // Merge defaults first so required fields are always present, then overlay the
+  // normalized DB config. This handles old DB records with missing or renamed fields.
   const initialConfig = Object.keys(actuator.behavior_config ?? {}).length > 0
-    ? normalizeConfig(actuator.behavior_type, actuator.behavior_config)
+    ? { ...DEFAULT_CONFIGS[actuator.behavior_type], ...normalizeConfig(actuator.behavior_type, actuator.behavior_config) }
     : DEFAULT_CONFIGS[actuator.behavior_type]
 
   const [draftType, setDraftType]     = useState<BehaviorType>(actuator.behavior_type)
   const [draftConfig, setDraftConfig] = useState<Record<string, unknown>>(initialConfig)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>(actuator.influence_nodes.map(n => n.id))
-  const [pulseDuration, setPulseDuration] = useState(5)
+  const [pulseDuration, setPulseDuration]       = useState(5)
+  // Optimistic relay state: set locally after pulse/stop so the badge updates
+  // immediately without waiting for the next heartbeat + query refetch cycle.
+  const [optimisticOn, setOptimisticOn] = useState<boolean | null>(null)
+
+  // Cycle states (CYCLE_ON / CYCLE_OFF) are only meaningful for VPD/fogger
+  // behavior. In cascade mode the coordinator reports its state for ALL relay
+  // slots, including relays that have schedule/irrigation/temperature behavior
+  // and are not participating in the VPD cycle. Ignore cycle state for those.
+  const isFoggerBehavior = actuator.behavior_type === 'vpd'
+  const cycleActive = isFoggerBehavior && (cycleState === 'CYCLE_ON' || cycleState === 'CYCLE_OFF')
+  const displayOn = optimisticOn ?? (cycleActive ? true : relayOn)
+
+  // Per-behavior-type config cache: preserves each type's draft when the user
+  // switches away and back, so work-in-progress isn't lost.
+  const configCache = useRef<Partial<Record<BehaviorType, Record<string, unknown>>>>({
+    [actuator.behavior_type]: initialConfig,
+  })
 
   // Inline label editing
   const [isEditingLabel, setIsEditingLabel] = useState(false)
@@ -584,8 +632,18 @@ function ActuatorCard({
   const labelInputRef = useRef<HTMLInputElement>(null)
 
   const handleTypeChange = (newType: BehaviorType) => {
+    if (newType === draftType) return
+    // Warn the user that switching behavior type will discard the current
+    // saved configuration when they eventually save.
+    const confirmed = window.confirm(
+      `¿Cambiar el comportamiento a "${BEHAVIOR_LABELS[newType]}"?\n\nSi guardás, se perderán los parámetros de configuración del comportamiento actual.`
+    )
+    if (!confirmed) return
+    // Save the current draft to the cache before switching away
+    configCache.current[draftType] = draftConfig
     setDraftType(newType)
-    setDraftConfig(DEFAULT_CONFIGS[newType])
+    // Restore the cached config for the new type if available, otherwise use defaults
+    setDraftConfig(configCache.current[newType] ?? DEFAULT_CONFIGS[newType])
   }
 
   const labelMutation = useMutation({
@@ -609,6 +667,19 @@ function ActuatorCard({
       relay_index: actuator.relay_index,
       duration_minutes: pulseDuration,
     }),
+    onSuccess: () => setOptimisticOn(true),
+  })
+
+  const stopMutation = useMutation({
+    mutationFn: () => sendControllerCommand(controllerId, {
+      command_type: 'stopRelay',
+      relay_index: actuator.relay_index,
+    }),
+    onSuccess: () => {
+      setOptimisticOn(false)
+      // Clear optimistic state after a delay so the next heartbeat takes over
+      setTimeout(() => setOptimisticOn(null), 35_000)
+    },
   })
 
   function commitLabelEdit() {
@@ -618,7 +689,7 @@ function ActuatorCard({
   }
 
   const savedConfig = Object.keys(actuator.behavior_config ?? {}).length > 0
-    ? normalizeConfig(actuator.behavior_type, actuator.behavior_config)
+    ? { ...DEFAULT_CONFIGS[actuator.behavior_type], ...normalizeConfig(actuator.behavior_type, actuator.behavior_config) }
     : DEFAULT_CONFIGS[actuator.behavior_type]
 
   const hasBehaviorChanges =
@@ -636,10 +707,10 @@ function ActuatorCard({
   return (
     <div style={{
       background: 'white',
-      border: `2px solid ${relayOn === true ? '#22c55e' : relayOn === false ? '#e5e7eb' : '#e5e7eb'}`,
+      border: `2px solid ${displayOn === true ? '#22c55e' : '#e5e7eb'}`,
       borderRadius: 10, padding: 18, display: 'flex', flexDirection: 'column', gap: 18,
       // Subtle green glow when relay is ON
-      boxShadow: relayOn === true ? '0 0 0 3px rgba(34,197,94,0.15)' : 'none',
+      boxShadow: displayOn === true ? '0 0 0 3px rgba(34,197,94,0.15)' : 'none',
     }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -665,13 +736,22 @@ function ActuatorCard({
           </button>
         )}
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {relayOn !== null && (
+          {(displayOn !== null || relayOn !== null || cycleState !== null) && (
             <span style={{
               fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
-              background: relayOn ? '#dcfce7' : '#f3f4f6',
-              color: relayOn ? '#16a34a' : '#9ca3af',
+              background: isFoggerBehavior && cycleState === 'CYCLE_ON'  ? '#dcfce7'
+                        : isFoggerBehavior && cycleState === 'CYCLE_OFF' ? '#fef9c3'
+                        : displayOn                                      ? '#dcfce7'
+                        :                                                  '#f3f4f6',
+              color:     isFoggerBehavior && cycleState === 'CYCLE_ON'  ? '#16a34a'
+                       : isFoggerBehavior && cycleState === 'CYCLE_OFF' ? '#854d0e'
+                       : displayOn                                      ? '#16a34a'
+                       :                                                  '#9ca3af',
             }}>
-              {relayOn ? 'ON' : 'OFF'}
+              {isFoggerBehavior && cycleState === 'CYCLE_ON'  ? 'ON'
+             : isFoggerBehavior && cycleState === 'CYCLE_OFF' ? 'Ciclando'
+             : displayOn                                      ? 'ON'
+             :                                                  'OFF'}
             </span>
           )}
           {!actuator.enabled && <span style={{ fontSize: 11, color: '#9ca3af' }}>deshabilitado</span>}
@@ -735,11 +815,11 @@ function ActuatorCard({
       {/* Pulse relay */}
       <div>
         <SectionLabel>PULSO MANUAL</SectionLabel>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="number" min="1" max="120" value={pulseDuration}
             onChange={e => setPulseDuration(parseInt(e.target.value))} style={{ ...inputStyle, width: 64 }} />
           <span style={unitStyle}>min</span>
-          <button type="button" onClick={() => pulseMutation.mutate()} disabled={pulseMutation.isPending}
+          <button type="button" onClick={() => pulseMutation.mutate()} disabled={pulseMutation.isPending || stopMutation.isPending}
             style={{
               background: pulseMutation.isSuccess ? '#d1fae5' : '#f9fafb',
               color: pulseMutation.isSuccess ? '#065f46' : '#374151',
@@ -748,7 +828,20 @@ function ActuatorCard({
             }}>
             {pulseMutation.isPending ? '...' : pulseMutation.isSuccess ? '✓ Enviado' : 'Enviar pulso'}
           </button>
+          {/* Stop button — only shown when relay appears to be ON */}
+          {displayOn === true && (
+            <button type="button" onClick={() => stopMutation.mutate()} disabled={stopMutation.isPending || pulseMutation.isPending}
+              style={{
+                background: stopMutation.isPending ? '#fef3c7' : '#fee2e2',
+                color: stopMutation.isPending ? '#92400e' : '#991b1b',
+                border: '1px solid', borderColor: stopMutation.isPending ? '#fcd34d' : '#fca5a5',
+                borderRadius: 6, padding: '6px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}>
+              {stopMutation.isPending ? '...' : 'Detener'}
+            </button>
+          )}
           {pulseMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al enviar</span>}
+          {stopMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al detener</span>}
         </div>
       </div>
     </div>
@@ -758,10 +851,14 @@ function ActuatorCard({
 // ── ControllerActuatorsPanel ──────────────────────────────────────────────────
 
 function ControllerActuatorsPanel({ controller }: { controller: Controller }) {
-  // Extract relay states from last heartbeat context
+  // Extract relay and cycle states from last heartbeat context
   const relayStates: boolean[] | null =
     Array.isArray(controller.context?.last_relay_states)
       ? (controller.context.last_relay_states as boolean[])
+      : null
+  const cycleStates: string[] | null =
+    Array.isArray(controller.context?.last_cycle_states)
+      ? (controller.context.last_cycle_states as string[])
       : null
   const { data: actuators, isLoading: loadingActuators, isError: errorActuators } = useQuery({
     queryKey: ['actuators', controller.id],
@@ -795,6 +892,7 @@ function ControllerActuatorsPanel({ controller }: { controller: Controller }) {
           controllerId={controller.id}
           siteDevices={siteDevices}
           relayOn={relayStates ? (relayStates[a.relay_index] ?? null) : null}
+          cycleState={(cycleStates?.[a.relay_index] as CycleState | undefined) ?? null}
         />
       ))}
       {/* Help card occupies the next grid cell, same aesthetics as relay cards */}

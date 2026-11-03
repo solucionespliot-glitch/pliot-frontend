@@ -159,9 +159,13 @@ export async function patchActuatorLabel(
   )
 }
 
+type ControllerCommand =
+  | { command_type: 'pulseRelay'; relay_index: number; duration_minutes: number }
+  | { command_type: 'stopRelay';  relay_index: number }
+
 export async function sendControllerCommand(
   controllerId: string,
-  command: { command_type: 'pulseRelay'; relay_index: number; duration_minutes: number },
+  command: ControllerCommand,
 ): Promise<void> {
   await api.post(`/dashboard/controllers/${controllerId}/commands`, command)
 }
