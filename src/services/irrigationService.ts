@@ -160,12 +160,31 @@ export async function patchActuatorLabel(
 }
 
 type ControllerCommand =
-  | { command_type: 'pulseRelay'; relay_index: number; duration_minutes: number }
-  | { command_type: 'stopRelay';  relay_index: number }
+  | { command_type: 'pulseRelay';  relay_index: number; duration_minutes: number }
+  | { command_type: 'stopRelay';   relay_index: number }
+  | { command_type: 'pauseRelay';  relay_index: number }
+  | { command_type: 'resumeRelay'; relay_index: number }
 
 export async function sendControllerCommand(
   controllerId: string,
   command: ControllerCommand,
 ): Promise<void> {
   await api.post(`/dashboard/controllers/${controllerId}/commands`, command)
+}
+
+// Controller-level cascade cycle timing — stored in context JSONB and read by the
+// firmware from controller.context in the snapshot. Fields are merged (not replaced).
+export interface ControllerContextPatch {
+  on_seconds?:           number
+  off_seconds?:          number
+  min_interval_seconds?: number
+  relay_mode?:           'cascade' | 'independent'
+  cascade_delay_ms?:     number
+}
+
+export async function updateControllerContext(
+  controllerId: string,
+  patch: ControllerContextPatch,
+): Promise<void> {
+  await api.patch(`/dashboard/controllers/${controllerId}/context`, patch)
 }

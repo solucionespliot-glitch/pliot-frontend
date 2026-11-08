@@ -5,6 +5,7 @@ import {
   getControllers,
   getControllerActuators,
   updateControllerOverride,
+  updateControllerContext,
   updateActuatorBehavior,
   updateActuatorNodes,
   sendControllerCommand,
@@ -223,7 +224,7 @@ function DaySelector({ days, onChange }: { days: number[]; onChange: (days: numb
 
 // ── Behavior config forms ─────────────────────────────────────────────────────
 
-function VpdForm({ config, setConfig }: { config: Record<string, unknown>; setConfig: (c: Record<string, unknown>) => void }) {
+function VpdForm({ config, setConfig, isCascade }: { config: Record<string, unknown>; setConfig: (c: Record<string, unknown>) => void; isCascade?: boolean }) {
   const set = (key: string, value: unknown) => setConfig({ ...config, [key]: value })
 
   // Active window is enabled when both fields are present in the config
@@ -258,16 +259,23 @@ function VpdForm({ config, setConfig }: { config: Record<string, unknown>; setCo
           onChange={e => set('hysteresis', parseFloat(e.target.value))} style={{ ...inputStyle, width: 80 }} />
         <span style={unitStyle}>kPa</span>
       </FormRow>
-      <FormRow label="Duración ON">
-        <input type="number" min="1" max="3600" value={(config.on_duration_seconds as number) ?? 30}
-          onChange={e => set('on_duration_seconds', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
-        <span style={unitStyle}>seg</span>
-      </FormRow>
-      <FormRow label="Duración OFF">
-        <input type="number" min="1" max="3600" value={(config.off_duration_seconds as number) ?? 120}
-          onChange={e => set('off_duration_seconds', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
-        <span style={unitStyle}>seg</span>
-      </FormRow>
+      {/* In cascade mode the cycle timing (on/off seconds) is shared by all VPD relays
+          and is configured at the controller level (the "Ciclo cascade" section above the
+          relay grid). Hide these fields here to avoid confusion. */}
+      {!isCascade && (
+        <>
+          <FormRow label="Duración ON">
+            <input type="number" min="1" max="3600" value={(config.on_duration_seconds as number) ?? 30}
+              onChange={e => set('on_duration_seconds', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
+            <span style={unitStyle}>seg</span>
+          </FormRow>
+          <FormRow label="Duración OFF">
+            <input type="number" min="1" max="3600" value={(config.off_duration_seconds as number) ?? 120}
+              onChange={e => set('off_duration_seconds', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
+            <span style={unitStyle}>seg</span>
+          </FormRow>
+        </>
+      )}
       <FormRow label="Tiempo máx. sin dato">
         <input type="number" min="1" max="60" value={(config.stale_timeout_minutes as number) ?? 15}
           onChange={e => set('stale_timeout_minutes', parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
@@ -499,12 +507,13 @@ function TemperatureForm({ config, setConfig }: { config: Record<string, unknown
   )
 }
 
-function BehaviorConfigForm({ type, config, setConfig }: {
+function BehaviorConfigForm({ type, config, setConfig, isCascade }: {
   type: BehaviorType
   config: Record<string, unknown>
   setConfig: (c: Record<string, unknown>) => void
+  isCascade?: boolean
 }) {
-  if (type === 'vpd')         return <VpdForm         config={config} setConfig={setConfig} />
+  if (type === 'vpd')         return <VpdForm         config={config} setConfig={setConfig} isCascade={isCascade} />
   if (type === 'schedule')    return <ScheduleForm    config={config} setConfig={setConfig} />
   if (type === 'irrigation')  return <IrrigationForm  config={config} setConfig={setConfig} />
   if (type === 'temperature') return <TemperatureForm config={config} setConfig={setConfig} />
@@ -589,12 +598,16 @@ function ActuatorCard({
   siteDevices,
   relayOn,
   cycleState,
+  isCascade,
+  isPaused,
 }: {
   actuator: Actuator
   controllerId: string
   siteDevices: Device[]
   relayOn: boolean | null
   cycleState: CycleState | null
+  isCascade: boolean
+  isPaused: boolean
 }) {
   const queryClient = useQueryClient()
 
@@ -607,18 +620,32 @@ function ActuatorCard({
   const [draftType, setDraftType]     = useState<BehaviorType>(actuator.behavior_type)
   const [draftConfig, setDraftConfig] = useState<Record<string, unknown>>(initialConfig)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>(actuator.influence_nodes.map(n => n.id))
-  const [pulseDuration, setPulseDuration]       = useState(5)
+  const [pulseDuration, setPulseDuration] = useState(5)
   // Optimistic relay state: set locally after pulse/stop so the badge updates
   // immediately without waiting for the next heartbeat + query refetch cycle.
-  const [optimisticOn, setOptimisticOn] = useState<boolean | null>(null)
+  const [optimisticOn,     setOptimisticOn]     = useState<boolean | null>(null)
+  // Optimistic paused state: set locally after pause/resume so the UI responds
+  // immediately. The real state comes from last_paused_states in the heartbeat context.
+  const [optimisticPaused, setOptimisticPaused] = useState<boolean | null>(null)
 
-  // Cycle states (CYCLE_ON / CYCLE_OFF) are only meaningful for VPD/fogger
-  // behavior. In cascade mode the coordinator reports its state for ALL relay
-  // slots, including relays that have schedule/irrigation/temperature behavior
-  // and are not participating in the VPD cycle. Ignore cycle state for those.
+  // The firmware reports per-relay cycle states in cascade mode:
+  //   CYCLE_ON  → this relay is physically ON right now
+  //   CYCLE_OFF → eligible (VPD high, window open) but waiting its turn in the rotation
+  //   IDLE      → not eligible (VPD ok, window closed, behavior not vpd)
+  //
+  // relayActive covers both ON and the waiting phase — showing green in both cases
+  // is intentional: a relay that is eligible and in the rotation IS "active" even
+  // when it's momentarily OFF between turns. Without this, short ON periods (40s)
+  // combined with infrequent heartbeats would almost never show green.
+  //
+  // displayOn → physical relay state (used for optimistic pulse/stop feedback).
+  // relayActive → green border/badge: physically ON OR in cascade rotation.
   const isFoggerBehavior = actuator.behavior_type === 'vpd'
-  const cycleActive = isFoggerBehavior && (cycleState === 'CYCLE_ON' || cycleState === 'CYCLE_OFF')
-  const displayOn = optimisticOn ?? (cycleActive ? true : relayOn)
+  const displayOn = optimisticOn !== null ? optimisticOn : (relayOn === true)
+  const coordinatorActive = isFoggerBehavior && (cycleState === 'CYCLE_ON' || cycleState === 'CYCLE_OFF')
+  const relayActive = displayOn || coordinatorActive
+  // Paused state: optimistic value takes precedence, then the value from the heartbeat.
+  const relayPaused = optimisticPaused !== null ? optimisticPaused : isPaused
 
   // Per-behavior-type config cache: preserves each type's draft when the user
   // switches away and back, so work-in-progress isn't lost.
@@ -677,9 +704,29 @@ function ActuatorCard({
     }),
     onSuccess: () => {
       setOptimisticOn(false)
-      // Clear optimistic state after a delay so the next heartbeat takes over
       setTimeout(() => setOptimisticOn(null), 35_000)
     },
+  })
+
+  // Pause: turns relay OFF and blocks all behavior controllers until resumeRelay.
+  const pauseMutation = useMutation({
+    mutationFn: () => sendControllerCommand(controllerId, {
+      command_type: 'pauseRelay',
+      relay_index: actuator.relay_index,
+    }),
+    onSuccess: () => {
+      setOptimisticOn(false)
+      setOptimisticPaused(true)
+    },
+  })
+
+  // Resume: re-enables behavior controllers, relay returns to its normal program.
+  const resumeMutation = useMutation({
+    mutationFn: () => sendControllerCommand(controllerId, {
+      command_type: 'resumeRelay',
+      relay_index: actuator.relay_index,
+    }),
+    onSuccess: () => setOptimisticPaused(false),
   })
 
   function commitLabelEdit() {
@@ -707,10 +754,10 @@ function ActuatorCard({
   return (
     <div style={{
       background: 'white',
-      border: `2px solid ${displayOn === true ? '#22c55e' : '#e5e7eb'}`,
+      border: `2px solid ${relayActive ? '#22c55e' : '#e5e7eb'}`,
       borderRadius: 10, padding: 18, display: 'flex', flexDirection: 'column', gap: 18,
-      // Subtle green glow when relay is ON
-      boxShadow: displayOn === true ? '0 0 0 3px rgba(34,197,94,0.15)' : 'none',
+      // Subtle green glow when relay is ON or in active cascade rotation
+      boxShadow: relayActive ? '0 0 0 3px rgba(34,197,94,0.15)' : 'none',
     }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -739,19 +786,17 @@ function ActuatorCard({
           {(displayOn !== null || relayOn !== null || cycleState !== null) && (
             <span style={{
               fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
-              background: isFoggerBehavior && cycleState === 'CYCLE_ON'  ? '#dcfce7'
-                        : isFoggerBehavior && cycleState === 'CYCLE_OFF' ? '#fef9c3'
-                        : displayOn                                      ? '#dcfce7'
-                        :                                                  '#f3f4f6',
-              color:     isFoggerBehavior && cycleState === 'CYCLE_ON'  ? '#16a34a'
-                       : isFoggerBehavior && cycleState === 'CYCLE_OFF' ? '#854d0e'
-                       : displayOn                                      ? '#16a34a'
-                       :                                                  '#9ca3af',
+              background: relayPaused ? '#fef3c7'
+                        : relayActive ? '#dcfce7'
+                        :               '#f3f4f6',
+              color:      relayPaused ? '#92400e'
+                        : relayActive ? '#16a34a'
+                        :               '#9ca3af',
             }}>
-              {isFoggerBehavior && cycleState === 'CYCLE_ON'  ? 'ON'
-             : isFoggerBehavior && cycleState === 'CYCLE_OFF' ? 'Ciclando'
-             : displayOn                                      ? 'ON'
-             :                                                  'OFF'}
+              {relayPaused       ? 'Pausado'
+             : displayOn         ? 'ON'
+             : coordinatorActive ? 'Ciclando'
+             :                    'OFF'}
             </span>
           )}
           {!actuator.enabled && <span style={{ fontSize: 11, color: '#9ca3af' }}>deshabilitado</span>}
@@ -771,7 +816,7 @@ function ActuatorCard({
       {/* Config form */}
       <div>
         <SectionLabel>PARÁMETROS</SectionLabel>
-        <BehaviorConfigForm type={draftType} config={draftConfig} setConfig={setDraftConfig} />
+        <BehaviorConfigForm type={draftType} config={draftConfig} setConfig={setDraftConfig} isCascade={isCascade} />
       </div>
 
       {hasBehaviorChanges && (
@@ -828,20 +873,34 @@ function ActuatorCard({
             }}>
             {pulseMutation.isPending ? '...' : pulseMutation.isSuccess ? '✓ Enviado' : 'Enviar pulso'}
           </button>
-          {/* Stop button — only shown when relay appears to be ON */}
-          {displayOn === true && (
-            <button type="button" onClick={() => stopMutation.mutate()} disabled={stopMutation.isPending || pulseMutation.isPending}
+          {/* Detener: visible when relay is active and not already paused.
+              Sends pauseRelay — the program stays suspended until the user resumes. */}
+          {relayActive && !relayPaused && (
+            <button type="button" onClick={() => pauseMutation.mutate()} disabled={pauseMutation.isPending || pulseMutation.isPending}
               style={{
-                background: stopMutation.isPending ? '#fef3c7' : '#fee2e2',
-                color: stopMutation.isPending ? '#92400e' : '#991b1b',
-                border: '1px solid', borderColor: stopMutation.isPending ? '#fcd34d' : '#fca5a5',
+                background: pauseMutation.isPending ? '#fef3c7' : '#fee2e2',
+                color: pauseMutation.isPending ? '#92400e' : '#991b1b',
+                border: '1px solid', borderColor: pauseMutation.isPending ? '#fcd34d' : '#fca5a5',
                 borderRadius: 6, padding: '6px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
               }}>
-              {stopMutation.isPending ? '...' : 'Detener'}
+              {pauseMutation.isPending ? '...' : 'Detener'}
             </button>
           )}
-          {pulseMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al enviar</span>}
-          {stopMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al detener</span>}
+          {/* Reanudar: visible when relay is paused. Sends resumeRelay. */}
+          {relayPaused && (
+            <button type="button" onClick={() => resumeMutation.mutate()} disabled={resumeMutation.isPending}
+              style={{
+                background: resumeMutation.isPending ? '#d1fae5' : '#dcfce7',
+                color: resumeMutation.isPending ? '#065f46' : '#15803d',
+                border: '1px solid #86efac',
+                borderRadius: 6, padding: '6px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              }}>
+              {resumeMutation.isPending ? '...' : '▶ Reanudar programa'}
+            </button>
+          )}
+          {pulseMutation.isError  && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al enviar</span>}
+          {pauseMutation.isError  && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al detener</span>}
+          {resumeMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al reanudar</span>}
         </div>
       </div>
     </div>
@@ -851,6 +910,13 @@ function ActuatorCard({
 // ── ControllerActuatorsPanel ──────────────────────────────────────────────────
 
 function ControllerActuatorsPanel({ controller }: { controller: Controller }) {
+  const queryClient = useQueryClient()
+
+  // Role check — producer and superuser can change relay coordination mode.
+  // Uses the cached 'me' query so no extra request is made.
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
+  const canEditMode = me?.role === 'producer' || me?.role === 'superuser'
+
   // Extract relay and cycle states from last heartbeat context
   const relayStates: boolean[] | null =
     Array.isArray(controller.context?.last_relay_states)
@@ -860,6 +926,38 @@ function ControllerActuatorsPanel({ controller }: { controller: Controller }) {
     Array.isArray(controller.context?.last_cycle_states)
       ? (controller.context.last_cycle_states as string[])
       : null
+  const pausedStates: boolean[] | null =
+    Array.isArray(controller.context?.last_paused_states)
+      ? (controller.context.last_paused_states as boolean[])
+      : null
+
+  // Cascade timing — shared by all VPD relays in cascade mode.
+  // These values live in controller.context and are sent to the firmware via snapshot.
+  // relay_mode defaults to 'cascade' when absent (matches firmware default).
+  const ctx = controller.context ?? {}
+  const isCascade = (ctx.relay_mode as string | undefined) !== 'independent'
+  const ctxOnSec  = (ctx.on_seconds           as number | undefined) ?? 5
+  const ctxOffSec = (ctx.off_seconds          as number | undefined) ?? 55
+  const [cascadeOnSec,  setCascadeOnSec]  = useState(ctxOnSec)
+  const [cascadeOffSec, setCascadeOffSec] = useState(ctxOffSec)
+
+  // Toggle relay coordination mode (cascade ↔ independent).
+  // Bumps config_version on the backend so the firmware re-syncs on next heartbeat.
+  const relayModeMutation = useMutation({
+    mutationFn: (mode: 'cascade' | 'independent') =>
+      updateControllerContext(controller.id, { relay_mode: mode }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['controllers'] }),
+  })
+
+  const cascadeMutation = useMutation({
+    mutationFn: () => updateControllerContext(controller.id, {
+      on_seconds: cascadeOnSec, off_seconds: cascadeOffSec,
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['controllers'] }),
+  })
+
+  const hasCascadeChanges = cascadeOnSec !== ctxOnSec || cascadeOffSec !== ctxOffSec
+
   const { data: actuators, isLoading: loadingActuators, isError: errorActuators } = useQuery({
     queryKey: ['actuators', controller.id],
     queryFn: () => getControllerActuators(controller.id),
@@ -884,19 +982,85 @@ function ControllerActuatorsPanel({ controller }: { controller: Controller }) {
   }
 
   return (
-    <div style={{ paddingTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
-      {actuators.map(a => (
-        <ActuatorCard
-          key={a.id}
-          actuator={a}
-          controllerId={controller.id}
-          siteDevices={siteDevices}
-          relayOn={relayStates ? (relayStates[a.relay_index] ?? null) : null}
-          cycleState={(cycleStates?.[a.relay_index] as CycleState | undefined) ?? null}
-        />
-      ))}
-      {/* Help card occupies the next grid cell, same aesthetics as relay cards */}
-      <BehaviorHelpCard />
+    <div style={{ paddingTop: 16 }}>
+      {/* Relay coordination mode selector — visible to producer/superuser only.
+          Cascade: one pump, solenoids take turns, shared ON/OFF timing.
+          Independent: each relay runs its own VPD cycle with its own timing. */}
+      {canEditMode && (
+        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 500 }}>Modo coordinación:</span>
+          <div style={{ display: 'flex', borderRadius: 6, border: '1px solid #d1d5db', overflow: 'hidden' }}>
+            {(['cascade', 'independent'] as const).map(mode => (
+              <button
+                key={mode}
+                type="button"
+                disabled={relayModeMutation.isPending}
+                onClick={() => { if ((isCascade ? 'cascade' : 'independent') !== mode) relayModeMutation.mutate(mode) }}
+                style={{
+                  padding: '5px 14px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  border: 'none',
+                  cursor: relayModeMutation.isPending ? 'not-allowed' : 'pointer',
+                  background: (mode === 'cascade' ? isCascade : !isCascade) ? '#3b82f6' : 'white',
+                  color:      (mode === 'cascade' ? isCascade : !isCascade) ? 'white'   : '#374151',
+                  transition: 'background 0.15s',
+                }}
+              >
+                {mode === 'cascade' ? 'Cascade' : 'Independiente'}
+              </button>
+            ))}
+          </div>
+          {relayModeMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al guardar</span>}
+        </div>
+      )}
+
+      {/* Cascade timing — only in cascade mode. Shared cycle ON/OFF duration for all VPD
+          relays. Stored in controller context, firmware reads it from the snapshot.
+          Per-relay VPD forms hide on/off timing in cascade mode to avoid duplicate config. */}
+      {isCascade && (
+        <div style={{ marginBottom: 16, padding: '12px 14px', background: 'white', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+          <SectionLabel>CICLO CASCADE — compartido por todos los relés VPD</SectionLabel>
+          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <FormRow label="Duración ON">
+              <input type="number" min="1" max="3600" value={cascadeOnSec}
+                onChange={e => setCascadeOnSec(parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
+              <span style={unitStyle}>seg</span>
+            </FormRow>
+            <FormRow label="Duración OFF">
+              <input type="number" min="1" max="3600" value={cascadeOffSec}
+                onChange={e => setCascadeOffSec(parseInt(e.target.value))} style={{ ...inputStyle, width: 80 }} />
+              <span style={unitStyle}>seg</span>
+            </FormRow>
+
+            {hasCascadeChanges && (
+              <button type="button" onClick={() => cascadeMutation.mutate()} disabled={cascadeMutation.isPending}
+                style={{ background: '#3b82f6', color: 'white', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                {cascadeMutation.isPending ? 'Guardando...' : 'Guardar ciclo'}
+              </button>
+            )}
+            {cascadeMutation.isSuccess && !hasCascadeChanges && <span style={{ fontSize: 12, color: '#16a34a' }}>✓ Guardado</span>}
+            {cascadeMutation.isError && <span style={{ fontSize: 12, color: '#dc2626' }}>Error al guardar</span>}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+        {actuators.map(a => (
+          <ActuatorCard
+            key={a.id}
+            actuator={a}
+            controllerId={controller.id}
+            siteDevices={siteDevices}
+            relayOn={relayStates ? (relayStates[a.relay_index] ?? null) : null}
+            cycleState={(cycleStates?.[a.relay_index] as CycleState | undefined) ?? null}
+            isCascade={isCascade}
+            isPaused={pausedStates ? (pausedStates[a.relay_index] ?? false) : false}
+          />
+        ))}
+        {/* Help card occupies the next grid cell, same aesthetics as relay cards */}
+        <BehaviorHelpCard />
+      </div>
     </div>
   )
 }
