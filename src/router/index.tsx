@@ -9,6 +9,7 @@ import TelemetryModule from '../pages/dashboard/TelemetryModule'
 import IrrigationModule from '../pages/dashboard/IrrigationModule'
 import ControllersModule from '../pages/dashboard/ControllersModule'
 import SettingsModule from '../pages/dashboard/SettingsModule'
+import AlarmsModule from '../pages/dashboard/AlarmsModule'
 
 function RootRedirect() {
   const { isAuthenticated, isLoading } = useAuth0()
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
       { path: 'telemetry/:deviceId', element: <TelemetryModule /> },
       { path: 'irrigation', element: <IrrigationModule /> },
       { path: 'controllers', element: <ControllersModule /> },
+      { path: 'alarms', element: <AlarmsModule /> },
       { path: 'settings', element: <SettingsModule /> },
     ],
   },

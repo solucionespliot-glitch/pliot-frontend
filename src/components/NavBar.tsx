@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth0 } from '@auth0/auth0-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { getOrganizations, impersonate } from '../services/settingsService'
 import { setImpersonateOrg, fetchMe } from '../services/api'
+import { getAlarmEvents } from '../services/alarmsService'
 
 const BASE_NAV_LINKS = [
   { to: '/dashboard/devices',     label: 'Dispositivos',  feature: null,         hidden: false },
   { to: '/dashboard/irrigation',  label: 'Riego',         feature: null,         hidden: true  },
   { to: '/dashboard/controllers', label: 'Controladores', feature: 'controllers', hidden: false },
+  { to: '/dashboard/alarms',      label: 'Alarmas',       feature: 'alarms',     hidden: false },
   { to: '/dashboard/settings',    label: 'Configuración', feature: null,         hidden: true  },
 ]
 
@@ -31,6 +33,7 @@ const linkStyle: React.CSSProperties = {
 
 export default function NavBar() {
   const { user, logout } = useAuth0()
+  const navigate = useNavigate()
   const [selectedOrg, setSelectedOrg] = useState(() => sessionStorage.getItem('impersonateOrg') ?? '')
   // On mobile, open the menu by default only on the site selector (no site chosen yet).
   // Once a site is selected and the user is in the dashboard, start closed.
@@ -45,6 +48,16 @@ export default function NavBar() {
 
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
   const isSuperuser = me?.role === 'superuser'
+
+  // Poll active unacknowledged alarms every 30s for the bell badge
+  const { data: alarmData } = useQuery({
+    queryKey: ['alarmsBadge'],
+    queryFn: () => getAlarmEvents({ active: true, limit: 1 }),
+    refetchInterval: 30_000,
+    // Only fetch when the user is authenticated (me is loaded)
+    enabled: !!me,
+  })
+  const unackedCount = alarmData?.unacked_active ?? 0
 
   // Filter nav links: hidden links are never shown, feature-flagged links require
   // the org to have that feature enabled (superusers bypass feature checks but not hidden).
@@ -140,6 +153,33 @@ export default function NavBar() {
                 )}
               </div>
             )}
+            {/* Alarm bell badge */}
+            <button
+              onClick={() => navigate('/dashboard/alarms')}
+              title="Ver alarmas"
+              style={{
+                position: 'relative', background: 'none', border: 'none',
+                cursor: 'pointer', padding: '4px 6px', display: 'flex', alignItems: 'center',
+              }}
+            >
+              {/* Bell SVG icon */}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={unackedCount > 0 ? '#DC2626' : '#9CA3AF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              {unackedCount > 0 && (
+                <span style={{
+                  position: 'absolute', top: 0, right: 0,
+                  background: '#DC2626', color: '#fff',
+                  borderRadius: '99px', fontSize: 10, fontWeight: 700,
+                  minWidth: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0 3px', lineHeight: 1,
+                }}>
+                  {unackedCount > 99 ? '99+' : unackedCount}
+                </span>
+              )}
+            </button>
+
             <span style={{ fontSize: 13, color: '#9CA3AF', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {user?.name ?? user?.email ?? '—'}
             </span>
